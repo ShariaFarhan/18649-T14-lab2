@@ -1,0 +1,6 @@
+.idea
+build
+dist
+logitech_steering_wheel.egg-info
+*.pyc
+venv
