@@ -1,0 +1,32 @@
+# Zephyr build output
+build/
+build-*/
+
+# west/zephyr caches, in case west is ever run from inside this repo by mistake
+.west/
+.cache/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+
+# Compiled binaries (e.g. the Pi's wheel_monitor build)
+*.o
+*.out
+wheel_monitor
+
+# Logs
+*.log
