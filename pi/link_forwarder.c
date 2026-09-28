@@ -18,11 +18,11 @@
 // ---------------------------CONFIG------------------------------------- 
 
 
-#define UART_DEV              "/dev/ttyUSB0"   // TODO: confirm 
-#define UART_BAUD             B115200          // TODO: confirm 
+#define UART_DEV             "/dev/ttyUSB0"   // TODO: confirm 
+#define UART_BAUD            B115200          // TODO: confirm 
 
-#define UDP_PORT              8000
-#define UDP_PACKET_LEN        276              // 4-byte counter+272-byte DIJOYSTATE2 
+#define UDP_PORT             8000
+#define UDP_PACKET_LEN       276              // 4-byte counter+272-byte DIJOYSTATE2 
 
 #define UDP_STALE_MS         100
 #define CMD_PERIOD_MS        50
@@ -37,6 +37,16 @@
 #define OFF_LY               8
 #define OFF_LRZ              24
 #define OFF_BUTTONS          52                // rgbButtons[128], byte array
+
+
+//button map
+#define RAW_BTN_LOCAL_FAIL   0   // button X
+#define RAW_BTN_RSB          8   // RSB
+#define RAW_BTN_LSB          9   // LSB
+
+#define BUTTON_BIT_LOCAL_FAIL  (1u << 0)
+#define BUTTON_BIT_RSB         (1u << 1)
+#define BUTTON_BIT_LSB         (1u << 2)
 
 
 // ----------------------RPI-TO-STM LINK FORMAT-------------------------- 
@@ -200,9 +210,13 @@ static void send_frame(int uart_fd, uint8_t seq, const uint8_t *payload, uint8_t
 
 
 static void extract_buttons_mask(const uint8_t *raw_buttons, uint16_t *out_mask) {
-    // TODO: map the specific raw button indices recorded in part 1
-    (void)raw_buttons;
-    *out_mask = 0;
+    uint16_t mask = 0;
+
+    if (raw_buttons[RAW_BTN_LOCAL_FAIL] & 0x80) mask |= BUTTON_BIT_LOCAL_FAIL;
+    if (raw_buttons[RAW_BTN_RSB]        & 0x80) mask |= BUTTON_BIT_RSB;
+    if (raw_buttons[RAW_BTN_LSB]        & 0x80) mask |= BUTTON_BIT_LSB;
+
+    *out_mask = mask;
 }
 
 static void *udp_rx_thread(void *arg) {
