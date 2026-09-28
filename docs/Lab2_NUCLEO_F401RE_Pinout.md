@@ -2,13 +2,13 @@
 
 Proposed shared pinout for **one NUCLEO-F401RE / STM32F401RET6**. Checked against ST UM1724 Rev 17, Table 29, and Zephyr's STM32F401 pin definitions. This is a pin-allocation document, not a compiled overlay or a hardware-tested wiring release. Confirm the physical board model before wiring.
 
-中文：这是本次统一分配的引脚，不是队友仓库里已经实现的配置。`CN10-13` 指 CN10 排针的第13脚，不是芯片第13脚。按板上 pin 1 标记和官方图编号，不要从照片左右猜顺序。
+
 
 ## STM32 signal table
 
 Left/right are viewed from the car's forward-facing direction.
 
-| Signal / 接什么 | STM32 pin | Board header | Peripheral / role |
+| Signal | STM32 pin | Board header | Peripheral / role |
 |---|---|---|---|
 | MOTOR_L_PWM → driver ENA | PA6 | CN10-13 (D12) | TIM3_CH1, AF2 |
 | MOTOR_R_PWM → driver ENB | PA7 | CN10-15 (D11) | TIM3_CH2, AF2 |
