@@ -1,0 +1,57 @@
+#include <zephyr/dt-bindings/pwm/pwm.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+	aliases {
+		steering-servo = &steering_servo;
+		blinker-fl = &blinker_fl;
+		blinker-fr = &blinker_fr;
+		blinker-rl = &blinker_rl;
+		blinker-rr = &blinker_rr;
+	};
+
+	servo_pwms {
+		compatible = "pwm-leds";
+
+		steering_servo: steering-servo {
+			pwms = <&pwm1 1 PWM_MSEC(20) PWM_POLARITY_NORMAL>;
+		};
+	};
+
+	blinker_outputs {
+		compatible = "gpio-leds";
+
+		blinker_fl: blinker-fl {
+			gpios = <&gpioc 6 GPIO_ACTIVE_HIGH>;
+		};
+
+		blinker_fr: blinker-fr {
+			gpios = <&gpioc 7 GPIO_ACTIVE_HIGH>;
+		};
+
+		blinker_rl: blinker-rl {
+			gpios = <&gpioc 8 GPIO_ACTIVE_HIGH>;
+		};
+
+		blinker_rr: blinker-rr {
+			gpios = <&gpioc 9 GPIO_ACTIVE_HIGH>;
+		};
+	};
+};
+
+/* PA8 is the board's default I2C3 SCL pin, so release it for TIM1_CH1. */
+&i2c3 {
+	status = "disabled";
+};
+
+&timers1 {
+	/* 84 MHz / (83 + 1) = 1 MHz, giving 1 us PWM resolution. */
+	st,prescaler = <83>;
+	status = "okay";
+
+	pwm1: pwm {
+		pinctrl-0 = <&tim1_ch1_pa8>;
+		pinctrl-names = "default";
+		status = "okay";
+	};
+};
