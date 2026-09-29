@@ -8,6 +8,16 @@
 		blinker-fr = &blinker_fr;
 		blinker-rl = &blinker_rl;
 		blinker-rr = &blinker_rr;
+		
+		/* Motor Speed PWM Aliases */
+		motor-left-pwm  = &motor_l_pwm;
+		motor-right-pwm = &motor_r_pwm;
+
+		/* Motor Direction GPIO Aliases */
+		motor-left-in1  = &motor_l_in1;
+		motor-left-in2  = &motor_l_in2;
+		motor-right-in1 = &motor_r_in1;
+		motor-right-in2 = &motor_r_in2;
 	};
 
 	servo_pwms {
@@ -21,22 +31,31 @@
 	blinker_outputs {
 		compatible = "gpio-leds";
 
-		blinker_fl: blinker-fl {
-			gpios = <&gpioc 6 GPIO_ACTIVE_HIGH>;
-		};
-
-		blinker_fr: blinker-fr {
-			gpios = <&gpioc 7 GPIO_ACTIVE_HIGH>;
-		};
-
-		blinker_rl: blinker-rl {
-			gpios = <&gpioc 8 GPIO_ACTIVE_HIGH>;
-		};
-
-		blinker_rr: blinker-rr {
-			gpios = <&gpioc 9 GPIO_ACTIVE_HIGH>;
-		};
+		blinker_fl: blinker-fl { gpios = <&gpioc 6 GPIO_ACTIVE_HIGH>; };
+		blinker_fr: blinker-fr { gpios = <&gpioc 7 GPIO_ACTIVE_HIGH>; };
+		blinker_rl: blinker-rl { gpios = <&gpioc 8 GPIO_ACTIVE_HIGH>; };
+		blinker_rr: blinker-rr { gpios = <&gpioc 9 GPIO_ACTIVE_HIGH>; };
 	};
+
+	motor_pwms {
+		compatible = "pwm-leds";
+
+		motor_l_pwm: motor_l_pwm { pwms = <&pwm3 1 PWM_KHZ(20) PWM_POLARITY_NORMAL>; };
+		motor_r_pwm: motor_r_pwm { pwms = <&pwm3 2 PWM_KHZ(20) PWM_POLARITY_NORMAL>; };
+	};
+
+	motor_direction {
+		compatible = "gpio-leds";
+
+		/* Left Motor Direction GPIOs (PB12, PB13) */
+		motor_l_in1: motor_l_in1 { gpios = <&gpiob 12 GPIO_ACTIVE_HIGH>; };
+		motor_l_in2: motor_l_in2 { gpios = <&gpiob 13 GPIO_ACTIVE_HIGH>; };
+
+		/* Right Motor Direction GPIOs (PB14, PB15) */
+		motor_r_in1: motor_r_in1 { gpios = <&gpiob 14 GPIO_ACTIVE_HIGH>; };
+		motor_r_in2: motor_r_in2 { gpios = <&gpiob 15 GPIO_ACTIVE_HIGH>; };
+	};
+
 };
 
 /* PA8 is the board's default I2C3 SCL pin, so release it for TIM1_CH1. */
@@ -44,6 +63,7 @@
 	status = "disabled";
 };
 
+/* PWM1: Steering Servo (PA8 / TIM1_CH1) */
 &timers1 {
 	/* 84 MHz / (83 + 1) = 1 MHz, giving 1 us PWM resolution. */
 	st,prescaler = <83>;
@@ -53,5 +73,16 @@
 		pinctrl-0 = <&tim1_ch1_pa8>;
 		pinctrl-names = "default";
 		status = "okay";
+	};
+};
+
+/* PWM3: Drive Motors (PA6/TIM3_CH1 & PA7/TIM3_CH2 at 20 kHz) */
+&timers3 {
+	status = "okay";
+
+	pwm3: pwm {
+		status = "okay";
+		pinctrl-0 = <&tim3_ch1_pa6 &tim3_ch2_pa7>;
+		pinctrl-names = "default";
 	};
 };
