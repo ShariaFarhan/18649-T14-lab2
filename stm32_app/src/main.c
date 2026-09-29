@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
@@ -268,7 +269,7 @@ static int cmd_motor_init(const struct shell *sh, size_t argc, char **argv)
 
 static int cmd_motor_set(const struct shell *sh, size_t argc, char **argv)
 {
-    if (argc < 4) {
+    if (argc != 4) {
         shell_error(sh, "Usage: motor set <left|right> <forward|backward|free|stop> <duty_cycle: 0-100>");
         return -EINVAL;
     }
@@ -300,16 +301,26 @@ static int cmd_motor_set(const struct shell *sh, size_t argc, char **argv)
     }
 
     /* 3. Parse Duty Cycle */
-    uint32_t duty_cycle = (uint32_t)strtoul(argv[3], NULL, 10);
-    if (duty_cycle > MAX_DUTY_CYCLE) {
-        shell_error(sh, "Invalid duty cycle: %u (must be 0 to %d)", duty_cycle, MAX_DUTY_CYCLE);
+    char *end;
+    errno = 0;
+    unsigned long parsed_duty = strtoul(argv[3], &end, 10);
+
+    if (errno != 0 || argv[3][0] < '0' || argv[3][0] > '9' ||
+        *end != '\0' || parsed_duty > MAX_DUTY_CYCLE) {
+        shell_error(sh, "Expected an integer duty cycle from 0 to %d", MAX_DUTY_CYCLE);
         return -EINVAL;
     }
+    uint32_t duty_cycle = (uint32_t)parsed_duty;
 
     /* Execute Driver Call */
     int rc = sys_motor_set(motor, duty_cycle, dir);
     if (rc == 0) {
-        shell_print(sh, "Motor %s set to %s at %u%% duty cycle.", argv[1], argv[2], duty_cycle);
+        if (dir == FREE || dir == STOP) {
+            shell_print(sh, "Motor %s: %s (duty argument ignored).", argv[1],
+                        dir == FREE ? "coasting, EN off" : "braking, EN on");
+        } else {
+            shell_print(sh, "Motor %s set to %s at %u%% duty cycle.", argv[1], argv[2], duty_cycle);
+        }
     } else {
         shell_error(sh, "Failed to set motor parameters (code %d).", rc);
     }

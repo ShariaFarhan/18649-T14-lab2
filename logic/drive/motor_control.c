@@ -38,98 +38,125 @@ static const struct motor_attr motors[NUM_MOTORS] = {
     }
 };
 
-int motor_init(void)
+/* Best-effort shutdown of both channels, including after partial init failure. */
+static int disable_all_motors(void)
 {
-    int rc;
+    int first_error = 0;
 
     for (size_t i = 0; i < NUM_MOTORS; i++) {
-        /* Verify hardware readiness */
-        if (!pwm_is_ready_dt(&motors[i].pwm) ||
-            !gpio_is_ready_dt(&motors[i].in1) ||
-            !gpio_is_ready_dt(&motors[i].in2)) {
-            printk("Error: Motor hardware channel %u not ready\n", i);
-            return -ENODEV;
+        int rc = pwm_is_ready_dt(&motors[i].pwm)
+                     ? pwm_set_pulse_dt(&motors[i].pwm, 0U)
+                     : -ENODEV;
+
+        if (first_error == 0 && rc != 0) {
+            first_error = rc;
         }
+    }
+    return first_error;
+}
 
-        /* Configure IN1 and IN2 pins as active outputs */
-        rc = gpio_pin_configure_dt(&motors[i].in1, GPIO_OUTPUT_INACTIVE);
-        if (rc != 0) return rc;
+int motor_init(void)
+{
+    /* Disable EN before configuring direction pins, also on reinitialization. */
+    int rc = disable_all_motors();
 
-        rc = gpio_pin_configure_dt(&motors[i].in2, GPIO_OUTPUT_INACTIVE);
-        if (rc != 0) return rc;
-
-        /* Initial state: Idle / Coast */
-        sys_motor_set((motor_mapping_t)i, 0, FREE);
+    if (rc != 0) {
+        goto fail;
     }
 
+    for (size_t i = 0; i < NUM_MOTORS; i++) {
+        if (!gpio_is_ready_dt(&motors[i].in1) ||
+            !gpio_is_ready_dt(&motors[i].in2)) {
+            rc = -ENODEV;
+            goto fail;
+        }
+
+        rc = gpio_pin_configure_dt(&motors[i].in1, GPIO_OUTPUT_INACTIVE);
+        if (rc != 0) {
+            goto fail;
+        }
+        rc = gpio_pin_configure_dt(&motors[i].in2, GPIO_OUTPUT_INACTIVE);
+        if (rc != 0) {
+            goto fail;
+        }
+    }
     return 0;
+
+fail:
+    /* Preserve the original error even if a shutdown attempt also fails. */
+    (void)disable_all_motors();
+    return rc;
+}
+
+static int motor_apply(const struct motor_attr *m, int in1, int in2,
+                       uint32_t pulse_ns)
+{
+    /* Do not change direction while EN is active. */
+    int rc = pwm_set_pulse_dt(&m->pwm, 0U);
+
+    if (rc != 0) {
+        goto fail;
+    }
+    rc = gpio_pin_set_dt(&m->in1, in1);
+    if (rc != 0) {
+        goto fail;
+    }
+    rc = gpio_pin_set_dt(&m->in2, in2);
+    if (rc != 0) {
+        goto fail;
+    }
+    if (pulse_ns != 0U) {
+        rc = pwm_set_pulse_dt(&m->pwm, pulse_ns);
+        if (rc != 0) {
+            goto fail;
+        }
+    }
+    return 0;
+
+fail:
+    /* A failed driver cannot guarantee shutdown; still attempt it and report. */
+    (void)pwm_set_pulse_dt(&m->pwm, 0U);
+    return rc;
 }
 
 int sys_motor_set(motor_mapping_t motor, uint32_t duty_cycle, direction_t direction)
 {
-    if (motor >= NUM_MOTORS) return -1;
-    if (duty_cycle > MAX_DUTY_CYCLE) return -1;
+    if ((unsigned int)motor >= NUM_MOTORS || duty_cycle > MAX_DUTY_CYCLE) {
+        return -EINVAL;
+    }
 
     const struct motor_attr *m = &motors[motor];
-    uint32_t pulse_ticks = (duty_cycle * m->pwm.period) / MAX_DUTY_CYCLE;
+    uint32_t pulse_ns = (uint32_t)(((uint64_t)duty_cycle * m->pwm.period) /
+                                   MAX_DUTY_CYCLE);
 
-    if (direction == FREE) {
-        /* 00 - Set both direction pins to LOW (Coast) */
-        gpio_pin_set_dt(&m->in1, 0); // Replaces gpio_clr
-        gpio_pin_set_dt(&m->in2, 0); // Replaces gpio_clr
+    switch (direction) {
+    case FREE:
+        /* L298N coast: EN must stay low, regardless of requested duty. */
+        return motor_apply(m, 0, 0, 0U);
+    case FORWARD:
+        return motor_apply(m, 1, 0, pulse_ns);
+    case BACKWARD:
+        return motor_apply(m, 0, 1, pulse_ns);
+    case STOP:
+        /* L298N dynamic brake: equal IN pins and EN continuously high. */
+        return motor_apply(m, 1, 1, m->pwm.period);
+    default:
+        return -EINVAL;
     }
-    else if (direction == FORWARD) {
-        /* Forward state (with left/right motor inversion logic preserved from your file)[cite: 6] */
-        gpio_pin_set_dt(&m->in1, 1); //[cite: 6]
-        gpio_pin_set_dt(&m->in2, 0);
-        // if (motor == LEFT_MOTOR) {
-        //     gpio_pin_set_dt(&m->in1, 0); //[cite: 6]
-        //     gpio_pin_set_dt(&m->in2, 1); //[cite: 6]
-        // } else {
-        //     gpio_pin_set_dt(&m->in1, 1); //[cite: 6]
-        //     gpio_pin_set_dt(&m->in2, 0); //[cite: 6]
-        // }
-    }
-    else if (direction == BACKWARD) {
-        /* Backward state[cite: 6] */
-        gpio_pin_set_dt(&m->in1, 0); //[cite: 6]
-        gpio_pin_set_dt(&m->in2, 1); //[cite: 6]
-        // if (motor == LEFT_MOTOR) {
-        //     gpio_pin_set_dt(&m->in1, 1); //[cite: 6]
-        //     gpio_pin_set_dt(&m->in2, 0); //[cite: 6]
-        // } else {
-        //     gpio_pin_set_dt(&m->in1, 0); //[cite: 6]
-        //     gpio_pin_set_dt(&m->in2, 1); //[cite: 6]
-        // }
-    }
-    else if (direction == STOP) {
-        /* 11 - Set both direction pins HIGH (Dynamic Brake)[cite: 6] */
-        gpio_pin_set_dt(&m->in1, 1); // Replaces gpio_set[cite: 6]
-        gpio_pin_set_dt(&m->in2, 1); // Replaces gpio_set[cite: 6]
-    }
-    else {
-        return -1;
-    }
-
-    /* Set pulse width on the PWM channel */
-    int rc = pwm_set_pulse_dt(&m->pwm, pulse_ticks);
-    if (rc != 0) {
-        return -1;
-    }
-
-    return 0;
 }
 
 int motor_debug_pins(motor_mapping_t motor, int in1, int in2, uint32_t duty)
 {
-    const struct motor_attr *m = &motors[motor];
-    int rc;
+    if ((unsigned int)motor >= NUM_MOTORS || duty > MAX_DUTY_CYCLE ||
+        (in1 != 0 && in1 != 1) || (in2 != 0 && in2 != 1)) {
+        return -EINVAL;
+    }
 
-    rc = gpio_pin_set_dt(&m->in1, in1);
-    printk("m%d in1=%d rc=%d\n", motor, in1, rc);
-    rc = gpio_pin_set_dt(&m->in2, in2);
-    printk("m%d in2=%d rc=%d\n", motor, in2, rc);
-    rc = pwm_set_pulse_dt(&m->pwm, (duty * m->pwm.period) / MAX_DUTY_CYCLE);
-    printk("m%d pwm rc=%d\n", motor, rc);
+    const struct motor_attr *m = &motors[motor];
+    uint32_t pulse_ns = (uint32_t)(((uint64_t)duty * m->pwm.period) /
+                                   MAX_DUTY_CYCLE);
+    int rc = motor_apply(m, in1, in2, pulse_ns);
+
+    printk("motor %d: IN=%d%d duty=%u rc=%d\n", motor, in1, in2, duty, rc);
     return rc;
 }
