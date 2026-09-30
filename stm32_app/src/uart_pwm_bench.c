@@ -152,7 +152,7 @@ static int status_cmd(const struct shell *sh, size_t argc, char **argv)
     bool current_brake = braking;
     int16_t current_steering = steering;
     uint32_t period3 = LL_TIM_GetAutoReload(TIM3)+1;
-    uint32_t left = LL_TIM_OC_GetCompareCH1(TIM3), right = LL_TIM_OC_GetCompareCH2(TIM3);
+    uint32_t left = LL_TIM_OC_GetCompareCH2(TIM3), right = LL_TIM_OC_GetCompareCH1(TIM3);
     uint32_t port_b = GPIOB->ODR, port_c = GPIOC->ODR;
     uint32_t period1 = LL_TIM_GetAutoReload(TIM1)+1, compare1 = LL_TIM_OC_GetCompareCH1(TIM1);
     uint32_t pulse = servo_get_last_pulse_us();

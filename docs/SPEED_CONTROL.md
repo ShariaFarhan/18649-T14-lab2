@@ -1,13 +1,13 @@
 # Mean-wheel-speed closed loop
 
-Feedback is `(left RPM + right RPM) / 2`, using the 3960-count x4 encoder module.
+Feedback is `(left RPM + right RPM) / 2`, using the 1320-count x4 encoder module, based on the ten-turn bench check.
 The controller produces a common drive duty for both motors. It is a **PI**
 controller (PID with D=0), with feedforward and anti-windup. It does not implement
 an electronic differential or individually force the two wheel speeds equal.
 
 ## Speed is not PWM
 
-The selected supplier table gives 110 RPM no-load and 85 RPM rated speed at 12 V.
+The previously selected R90 supplier table gives 110 RPM no-load and 85 RPM rated speed at 12 V. The later 1320-CPR wheel measurement does not support assuming that R90 variant is installed; those speed values are not a calibration of the actual motors.
 100% PWM only keeps the driver enabled; it does not guarantee either speed on
 the actual car. Supply voltage, L298N voltage drop and load affect the result.
 The Lab2 handout lets the team choose and document full-throttle target speed.
@@ -35,7 +35,7 @@ the resulting PWM; it must not apply another throttle deadband.
 The loop sleeps approximately 10ms and uses measured elapsed time, not a fixed
 assumed interval. New input applies synchronously instead of waiting for the
 next loop; the actual 2ms requirement still needs an oscilloscope measurement.
-PWM_SET is PC11 / CN7-2, now toggled in the shared motor driver immediately after each successful final LEFT timer write (matching PWM_OUT on PA6). The control loop must not toggle it a second time. While braking,
+PWM_SET is PC11 / CN7-2, now toggled in the shared motor driver immediately after each successful final LEFT timer write (matching PWM_OUT on PA7). The control loop must not toggle it a second time. While braking,
 the reported `drive_pwm=0` means zero propulsion; EN is held HIGH for dynamic brake.
 
 Initial tuning in `speed_pi.c`: Kp=0.4 duty-percent/RPM, Ki=0.8

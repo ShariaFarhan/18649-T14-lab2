@@ -1,0 +1,16 @@
+<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>方向盘 → 转向测试</title><style>
+body{font:17px system-ui;background:#f3f5fa;color:#18304b;padding:30px}main{max-width:620px;margin:auto;background:white;border-radius:16px;padding:28px}h1{font-size:26px}p{line-height:1.6;color:#657188}button{font:17px system-ui;padding:14px;border:0;border-radius:10px;cursor:pointer;color:white}.buttons{display:flex;gap:16px}.buttons button{flex:1}#start{background:#2460cd}#stop{background:#b32640}.box{background:#f0f4fa;padding:18px;border-radius:10px;line-height:2;margin:18px 0}#error{color:#b32640}
+</style><main><h1>方向盘 → 转向测试</h1><p>G920 → 电脑 UDP → Pi 4 → STM32 PA8</p>
+<div class="box"><div id="wheel">检测方向盘…</div><div id="raw">原始值：—</div><div id="output">STM32：等待数据</div></div>
+<div class="buttons"><button id="start">开始跟随</button><button id="stop">停止并回中</button></div>
+<p id="mode">当前只读取，不控制舵机。</p><p id="error"></p>
+<p>当前测试范围 <strong>1000–2000 μs</strong>，中位 1500 μs。先轻轻左右转动，确认方向。</p>
+<p>使用 Windows 原生读取，不加载 Logitech SDK、不发送方向盘力反馈。电机动力电源保持断开；程序也将两个电机使能脚保持低电平。</p></main>
+<script>
+const el=id=>document.getElementById(id);async function post(path){let r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});if(!r.ok)throw Error(await r.text());return r.json()}
+el('start').onclick=()=>post('/start').catch(e=>el('error').textContent=e.message);
+el('stop').onclick=()=>post('/stop').catch(e=>el('error').textContent=e.message);
+async function poll(){try{let s=await post('/status');el('wheel').textContent=s.wheel_ok?'方向盘已连接':'方向盘未连接';el('raw').textContent=s.raw?`方向盘 X=${s.raw.x} · 油门 Z=${s.raw.z} · 刹车 R=${s.raw.r}`:'原始值：—';el('mode').textContent=s.enabled?'跟随中；页面失联会停止发送，舵机回中。':'已停止发送；尚未开始时 PWM 关闭，运行后停止则回中。';el('output').textContent=s.stm?`STM32：${s.stm.pulse_us} μs · 转向 ${s.stm.percent}% · 状态 ${s.stm.zone}`:'STM32：等待回传';}catch(e){el('output').textContent='控制服务未连接'}setTimeout(poll,100)}
+window.addEventListener('pagehide',()=>navigator.sendBeacon('/stop',new Blob(['{}'],{type:'application/json'})));poll();
+</script></html>

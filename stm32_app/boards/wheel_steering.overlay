@@ -1,0 +1,7 @@
+/* Steering/UART only. Motor PWM and encoder timers are not used. */
+&pwm3 { status = "disabled"; };
+&timers3 { status = "disabled"; };
+&encoder_left { status = "disabled"; };
+&encoder_right { status = "disabled"; };
+&timers2 { status = "disabled"; };
+&timers4 { status = "disabled"; };

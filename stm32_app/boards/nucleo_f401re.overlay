@@ -40,20 +40,20 @@
 	motor_pwms {
 		compatible = "pwm-leds";
 
-		motor_l_pwm: motor_l_pwm { pwms = <&pwm3 1 PWM_KHZ(20) PWM_POLARITY_NORMAL>; };
-		motor_r_pwm: motor_r_pwm { pwms = <&pwm3 2 PWM_KHZ(20) PWM_POLARITY_NORMAL>; };
+		motor_l_pwm: motor_l_pwm { pwms = <&pwm3 2 PWM_KHZ(20) PWM_POLARITY_NORMAL>; };
+		motor_r_pwm: motor_r_pwm { pwms = <&pwm3 1 PWM_KHZ(20) PWM_POLARITY_NORMAL>; };
 	};
 
 	motor_direction {
 		compatible = "gpio-leds";
 
-		/* Left Motor Direction GPIOs (PB12, PB13) */
-		motor_l_in1: motor_l_in1 { gpios = <&gpiob 12 GPIO_ACTIVE_HIGH>; };
-		motor_l_in2: motor_l_in2 { gpios = <&gpiob 13 GPIO_ACTIVE_HIGH>; };
+		/* Physical left wheel: bridge B (PB14, PB15), confirmed during bench test. */
+		motor_l_in1: motor_l_in1 { gpios = <&gpiob 14 GPIO_ACTIVE_HIGH>; };
+		motor_l_in2: motor_l_in2 { gpios = <&gpiob 15 GPIO_ACTIVE_HIGH>; };
 
-		/* Right Motor Direction GPIOs (PB14, PB15) */
-		motor_r_in1: motor_r_in1 { gpios = <&gpiob 14 GPIO_ACTIVE_HIGH>; };
-		motor_r_in2: motor_r_in2 { gpios = <&gpiob 15 GPIO_ACTIVE_HIGH>; };
+		/* Physical right wheel: bridge A (PB12, PB13). */
+		motor_r_in1: motor_r_in1 { gpios = <&gpiob 12 GPIO_ACTIVE_HIGH>; };
+		motor_r_in2: motor_r_in2 { gpios = <&gpiob 13 GPIO_ACTIVE_HIGH>; };
 	};
 
 };
@@ -86,7 +86,7 @@
 		pinctrl-names = "default";
 	};
 };
-/* Lab2 wheel encoders: 90 * 11 * x4 = 3960 counts per wheel revolution.
+/* Lab2 wheel encoders: 1320 counts per wheel revolution, supported by ten-turn measurements.
  * Keep Sidrisha's motor TIM3 and Ryan's servo TIM1 assignments unchanged. */
 / {
  aliases {
@@ -118,7 +118,7 @@
   pinctrl-0 = <&tim2_ch1_pa0 &tim2_ch2_pa1>;
   pinctrl-names = "default";
   st,encoder-mode = <3>; /* Both A/B edges: x4. */
-  st,counts-per-revolution = <3960>;
+  st,counts-per-revolution = <1320>;
   st,input-filter-level = <3>;
  };
 };
@@ -130,12 +130,12 @@
   pinctrl-0 = <&tim4_ch1_pb6 &tim4_ch2_pb7>;
   pinctrl-names = "default";
   st,encoder-mode = <3>;
-  st,counts-per-revolution = <3960>;
+  st,counts-per-revolution = <1320>;
   st,input-filter-level = <3>;
  };
 };
 
-/* Scope markers: shared driver marks final LEFT PWM writes; PWM_OUT taps PA6. */
+/* Scope markers: shared driver marks final LEFT PWM writes; PWM_OUT taps PA7. */
 / { zephyr,user { pwm-set-test-gpios = <&gpioc 11 GPIO_ACTIVE_HIGH>; }; };
 
 /* USART1 is separate from the USART2 ST-LINK console. */

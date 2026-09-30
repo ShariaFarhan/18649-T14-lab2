@@ -7,7 +7,7 @@ Open http://127.0.0.1:8765 on the Windows computer. The PC sends test commands t
 - Motor forward PWM, coast and brake priority. Both motors use the same duty.
 - Steering PWM on PA8, initially disabled; explicit enable from the page.
 - Front/rear left and right blinkers, hazards, steering-return auto-cancel.
-- Dual encoder sampling and COM9 `encoder status / zero / sign` commands (3960 CPR remains an assumption).
+- Dual encoder sampling and COM9 `encoder status / zero / sign` commands (1320 CPR selected from the ten-turn check).
 - UART validation, feedback and timeout handling. On link loss: motor brake, hazards, and center an already-enabled servo.
 
 Motor control is still fixed PWM for voltage measurements. Encoder PI remains in the normal project sources but is not enabled in this bench profile. Current sensing and real wheel input calibration are not implemented by this bench profile. The unified startup/fault/recovery state machine is implemented and the page emulates the future wheel self-test button. No unconnected current sensor values are presented as measurements.
@@ -27,8 +27,8 @@ Black probe to GND. The readings below are approximate DC averages; a voltmeter 
 
 | Function | STM32 pin | Expected reading |
 |---|---|---|
-| Left motor PWM | PA6, CN10-13 | 50% throttle / no brake: about 1.65 V |
-| Right motor PWM | PA7, CN10-15 | Same as left |
+| Left motor PWM | PA7, CN10-15 | 50% throttle / no brake: about 1.65 V |
+| Right motor PWM | PA6, CN10-13 | Same as left |
 | Motor brake | PA6/PA7, PB12–PB15 | All about 3.3 V |
 | Motor coast | Same six pins | All about 0 V |
 | Steering | PA8, CN10-23 | Left 50% about 0.21 V; center 0.25 V; right 50% 0.29 V |
@@ -118,15 +118,15 @@ Bring out these 13 rows in order, one signal per connected breadboard row:
 | 4 | CMD_TX | Pi GPIO24, physical 18 | Toggle immediately before writing a command frame to UART |
 | 5 | CMD_RX | STM32 PC10, CN7-1 | Toggle after complete frame CRC/length/sequence acceptance, before command handling |
 | 6 | PWM_SET | STM32 PC11, CN7-2 | Toggle immediately after a successful final LEFT motor timer write |
-| 7 | PWM_OUT | PA6, CN10-13 | Actual left motor PWM |
-| 8 | DIR_A | PB13, CN10-30 | Actual left IN2: LOW forward, HIGH brake |
+| 7 | PWM_OUT | PA7, CN10-15 | Actual left motor PWM |
+| 8 | DIR_A | PB15, CN10-26 | Actual left IN2: LOW forward, HIGH brake |
 | 9 | SRV | PA8, CN10-23 | Actual steering PWM |
 | 10 | FL | PC6, CN10-4 | Actual front-left output |
 | 11 | FR | PC7, CN10-19 | Actual front-right output |
 | 12 | RL | PC8, CN10-2 | Actual rear-left output |
 | 13 | RR | PC9, CN10-1 | Actual rear-right output |
 
-The seven actuator signals are physical taps, not extra software GPIOs. DIR_A uses PB13 instead of the previously proposed PB12 because PB12 has no edge when forward drive changes to the current brake mode.
+The seven actuator signals are physical taps, not extra software GPIOs. After correcting the physical motor sides, DIR_A uses left IN2 (PB15). Left IN1 (PB14) has no edge when forward drive changes to the current brake mode.
 
 For throttle: scope CMD_RX against PWM_SET, then PWM_SET against PWM_OUT. For brake: scope CMD_RX against DIR_A. For steering/lights: scope CMD_RX against SRV or the selected lamp output. Repeat measurements under load; code/edge counts alone do not establish the timing deadline.
 
@@ -137,3 +137,5 @@ UDP_RX also marks subsequently rejected datagrams, which have no matching comman
 Both markers start LOW. Pi requests GPIO23/24 exclusively and reads back levels; missing/busy GPIO markers stop the relay instead of silently omitting instrumentation. STM32 initialization failures prevent normal operation. `bench status` reports CMD_RX/PWM_SET edge counts and marker errors. Pi counts and readback are available under `test_points` in the local `/status` response.
 
 Verification of the scope-marker update (2026-09-30): both the integrated bench and default PI/manual firmware profiles compiled. Motor/brake hook-order tests and speed-controller regression tests passed. Pi GPIO23/24 were claimed on the RP1 chip, toggled, and read back at both levels; running readback matched counter parity. STM32 CMD_RX/PWM_SET counts advanced with zero marker errors. Live self-test, invalid-input and recovery checks passed after instrumentation. This verifies instrumentation behavior, not oscilloscope timing acceptance.
+
+Motor-side correction (2026-09-30): physical left is PA7/PB14/PB15 (bridge B); physical right is PA6/PB12/PB13 (bridge A). Forward/backward electrical polarity, encoder wiring, encoder signs and 1320 CPR are unchanged. PWM_OUT now taps PA7 and DIR_A PB15 to remain aligned with the LEFT PWM_SET marker.

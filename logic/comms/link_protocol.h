@@ -25,9 +25,15 @@
 //Pi to STM32, sent every <=50ms (CMD_PERIOD_MS on the Pi side) 
 
 typedef struct {
+#ifdef LAB2_RAW_WHEEL_LINK
+    int32_t  steering_raw;
+    int32_t  throttle_raw;
+    int32_t  brake_raw;
+#else
     int16_t  steering_raw;
     int16_t  throttle_raw;
     int16_t  brake_raw;
+#endif
     uint16_t buttons;      /* bitmask, see extract_buttons_mask() on the Pi */
     uint8_t  flags;        /* bit0 = FLAG_UDP_STALE */
 } cmd_payload_t;
@@ -63,9 +69,17 @@ enum pi_link_zone_state {
 //TODO: replace with our vals
 
 
+#ifdef LAB2_RAW_WHEEL_LINK
+#define RAW_STEER_MIN 0
+#define RAW_STEER_MAX 65535
+#define RAW_PEDAL_MIN 0
+#define RAW_PEDAL_MAX 65535
+#else
 #define RAW_STEER_MIN   ((int16_t)-32767)
 #define RAW_STEER_MAX   ((int16_t)32766)
 #define RAW_PEDAL_MIN   ((int16_t)0)
 #define RAW_PEDAL_MAX   ((int16_t)32767)
+
+#endif
 
 #endif /* LINK_PROTOCOL_H */

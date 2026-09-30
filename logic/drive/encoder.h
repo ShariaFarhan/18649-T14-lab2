@@ -3,11 +3,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Table-based assumption: 90:1 gearbox * 11 pulses * x4 = 3960.
- * Validate with marked wheel turns; this is not a hardware measurement. */
-#define COUNTS_PER_WHEEL_REV 3960U
+/* Bench calibration: 10 wheel turns gave L=13186 and R=13222 counts.
+ * Use nominal 1320 counts/turn (x4), consistent with 30:1 * 11 * 4. */
+#define COUNTS_PER_WHEEL_REV 1320U
 #define ENCODER_LEFT_DEFAULT_SIGN 1
-#define ENCODER_RIGHT_DEFAULT_SIGN 1
+#define ENCODER_RIGHT_DEFAULT_SIGN (-1) /* Right wheel polarity confirmed on the bench. */
 #define ENCODER_SAMPLE_PERIOD_MS 10U
 #define ENCODER_MAX_SAMPLE_GAP_US 250000U
 enum encoder_wheel { ENCODER_LEFT, ENCODER_RIGHT, ENCODER_WHEEL_COUNT };
