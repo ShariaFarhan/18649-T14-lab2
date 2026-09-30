@@ -27,6 +27,9 @@
 #define SERVO_PULSE_RIGHT_US     2000U
 #endif
 
+/* Check/initialize hardware with PWM disabled (safe for startup/retry). */
+int servo_prepare(void);
+
 /* Initialize the PWM device and move the steering servo to center. */
 int servo_init(void);
 

@@ -47,15 +47,15 @@ PWM_OUT, DIR_A, SRV and FL/FR/RL/RR test points are taps of the actual signals a
 
 ## Pi-to-STM32 wiring
 
-Selected baseline: **3.3 V GPIO UART, 115200 baud, 8N1**, with Pi 4 and STM32 independently powered.
+Selected baseline: **3.3 V GPIO UART, 115200 baud, 8N1**, with Pi 4 / Pi 5 and STM32 independently powered.
 
-| Raspberry Pi 4 | Connect to Nucleo |
+| Raspberry Pi 4 / Pi 5 | Connect to Nucleo |
 |---|---|
 | GPIO14 / TXD, physical pin 8 | PA10 / RX, CN10-33 |
 | GPIO15 / RXD, physical pin 10 | PA9 / TX, CN10-21 |
 | GND, physical pin 6 | GND, CN7-20 |
 
-Enable the Pi UART, disable its serial login console, and use `/dev/serial0` after verifying the device mapping. Sharia's `pi/link_forwarder.c` currently specifies `/dev/ttyUSB0` with a TODO: change it for the GPIO-UART baseline. Keep USART2 for debug logs; do not print console text onto the USART1 binary protocol link.
+Enable the GPIO UART and ensure no login console uses that device. On Pi 4, verify the `/dev/serial0` mapping. On the tested Pi 5, `sudo dtoverlay uart0-pi5` enables GPIO14/15 as `/dev/ttyAMA0` until reboot; `/dev/serial0` points to the separate debug UART (`ttyAMA10`) and must not be used for these wires. Sharia's `pi/link_forwarder.c` currently specifies `/dev/ttyUSB0` with a TODO: change it for the GPIO-UART baseline. Keep USART2 for debug logs; do not print console text onto the USART1 binary protocol link.
 
 If the team already has a **3.3 V USB-to-TTL adapter**, it can instead connect adapter TX → PA10, adapter RX → PA9, adapter GND → common GND. Then the Pi device may be `/dev/ttyUSB0` (verify it). Do not connect both UART sources simultaneously. Do not connect an adapter's power pin or an RS-232-voltage signal to these GPIOs.
 
@@ -110,3 +110,24 @@ The exact timer encoder binding depends on the team's Zephyr version; verify tha
 - [Zephyr STM32F401 pin multiplexing definitions](https://github.com/zephyrproject-rtos/hal_stm32/blob/main/dts/st/f4/stm32f401r%28d-e%29tx-pinctrl.dtsi)
 - [Raspberry Pi UART configuration](https://www.raspberrypi.com/documentation/computers/configuration.html#configuring-uarts)
 - Lab2 handout: single STM32, serial command/status link, three current sensors, four lamps and the 13-row test-point board.
+
+## UART transport bench profile
+
+Build with `-DLAB2_UART_DIAGNOSTIC=ON -DEXTRA_CONF_FILE=uart_diagnostic.conf`.
+This preserves the COM9 motor/servo/encoder shell and enables USART1 receive + heartbeat.
+Incoming UART commands are printed only; they do not actuate outputs.
+The diagnostic heartbeat reports state 4 (not vehicle-ready) and 65535 for unavailable currents.
+
+On Pi: `python3 tests/pi_uart_bench.py /dev/ttyAMA0`.
+On STM32 console: `link status`, then `drive status`.
+The Pi script sends 26 valid commands and one deliberately bad CRC.
+Expect 26 accepted, one rejected, correct decoded values, and link-lost after silence.
+This checks this branch's legacy 9-byte command payload only, not the separate v2 integration forwarder or UDP path.
+
+Bench result (2026-09-30): Pi 5 GPIO UART at 115200 8N1 + NUCLEO-F401RE.
+STM32 accepted 26/26 valid commands, rejected the one corrupt frame, and reported zero sequence gaps.
+Decoded values matched 1234 / 5678 / 90 / buttons 5 / flags 1.
+Pi received 85 CRC-valid heartbeats with zero sequence gaps during this short test.
+After silence, STM32 reported link-lost; this is functional timeout observation, not a measured deadline bound.
+COM9 remained independently usable after reconnecting ST-LINK USB.
+Drive status stayed disarmed with brake on. GPIO UART enablement on Pi is runtime-only until made persistent.

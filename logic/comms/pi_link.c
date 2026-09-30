@@ -6,6 +6,7 @@
 #include <zephyr/drivers/uart.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/sys/ring_buffer.h>
+#include <zephyr/sys/atomic.h>
 #include <string.h>
 
 #include "pi_link.h"
@@ -30,7 +31,9 @@ static const struct gpio_dt_spec cmd_rx_tp = GPIO_DT_SPEC_GET(TP_NODE, cmd_rx_te
 
 //timing params
 #define HEARTBEAT_PERIOD_MS   20   
-#define LINK_TIMEOUT_MS       150  
+#ifndef LINK_TIMEOUT_MS
+#define LINK_TIMEOUT_MS       150
+#endif
                                  
 #define MID_FRAME_TIMEOUT_MS  20   
 
@@ -71,15 +74,16 @@ static void uart_isr(const struct device *dev, void *user_data)
 //----------------------------shared state---------------------------------------
 static struct k_mutex state_lock;
 
-static volatile bool link_alive;             //watchdog-owned heartbeat thread only
-static int64_t last_valid_cmd_uptime_ms;     // heartbeat thread only
+static K_MUTEX_DEFINE(dispatch_lock); /* Serialize command and timeout callbacks. */
+static atomic_t link_alive;
+static int64_t last_valid_cmd_uptime_ms; /* guarded by dispatch_lock */
+static atomic_t last_timeout_age_ms;
 
 static enum pi_link_zone_state zone_override = ZONE_STATE_INIT; //mutex-guarded 
-static uint16_t reported_current_motor_l, reported_current_motor_r, reported_current_servo; //mutex-guarded via getter
 
-static uint32_t rx_valid_count;
-static uint32_t rx_crc_fail_count;
-static uint32_t rx_seq_gap_count;
+static atomic_t rx_valid_count;
+static atomic_t rx_crc_fail_count;
+static atomic_t rx_seq_gap_count;
 static bool have_last_seq;
 static uint8_t last_seq;
 //------------------------------------default callbacks----------------------------------------- 
@@ -90,6 +94,13 @@ __weak void pi_link_on_command_received(const cmd_payload_t *cmd, bool plausible
            cmd->steering_raw, cmd->throttle_raw, cmd->brake_raw,
            cmd->buttons, cmd->flags, plausible);
 }
+
+__weak bool pi_link_command_is_fresh(const cmd_payload_t *cmd, bool plausible)
+{
+    return plausible && !(cmd->flags & FLAG_UDP_STALE);
+}
+
+__weak void pi_link_on_invalid_frame(void) { }
 
 __weak void pi_link_on_link_lost(void)
 {
@@ -107,6 +118,11 @@ __weak void pi_link_get_currents(uint16_t *motor_l, uint16_t *motor_r, uint16_t 
     *motor_l = 0;
     *motor_r = 0;
     *servo = 0;
+}
+
+__weak void pi_link_customize_heartbeat(hb_payload_t *hb)
+{
+    ARG_UNUSED(hb);
 }
 
 void pi_link_set_zone_state_override(enum pi_link_zone_state state)
@@ -151,46 +167,52 @@ static void parser_thread_fn(void *a, void *b, void *c)
                 continue;
             }
             if (result == LP_REJECTED) {
-                rx_crc_fail_count++;
+                atomic_inc(&rx_crc_fail_count);
+                k_mutex_lock(&dispatch_lock, K_FOREVER);
+                pi_link_on_invalid_frame();
+                k_mutex_unlock(&dispatch_lock);
                 continue;
             }
 
             //LP_VALID from here down
             if (payload_len != sizeof(cmd_payload_t)) {
                 // Right CRC, wrong shape reject rather than reinterpret-cast garbage onto struct
-                rx_crc_fail_count++;
+                atomic_inc(&rx_crc_fail_count);
+                k_mutex_lock(&dispatch_lock, K_FOREVER);
+                pi_link_on_invalid_frame();
+                k_mutex_unlock(&dispatch_lock);
                 continue;
             }
 
             cmd_payload_t cmd;
             memcpy(&cmd, payload, sizeof(cmd));
-            rx_valid_count++;
-
-            //CMD_RX test point, toggle asap after frame accepted
-#if HAVE_CMD_RX_TP
-            gpio_pin_toggle_dt(&cmd_rx_tp);
-#endif
-
-            // Watchdog reset 
-            last_valid_cmd_uptime_ms = k_uptime_get();
-            if (!link_alive) {
-                link_alive = true;
-                pi_link_on_link_restored();
-            }
-
-            // seq gap/dup detection 
-            if (have_last_seq && (uint8_t)(seq - last_seq) != 1) {
-                rx_seq_gap_count++;
-            }
-            last_seq = seq;
-            have_last_seq = true;
-
             bool plausible =
                 cmd.steering_raw >= RAW_STEER_MIN && cmd.steering_raw <= RAW_STEER_MAX &&
                 cmd.throttle_raw >= RAW_PEDAL_MIN && cmd.throttle_raw <= RAW_PEDAL_MAX &&
-                cmd.brake_raw    >= RAW_PEDAL_MIN && cmd.brake_raw    <= RAW_PEDAL_MAX;
+                cmd.brake_raw >= RAW_PEDAL_MIN && cmd.brake_raw <= RAW_PEDAL_MAX;
 
+            k_mutex_lock(&dispatch_lock, K_FOREVER);
+            uint8_t delta = (uint8_t)(seq - last_seq);
+            if (have_last_seq && atomic_get(&link_alive) && (delta == 0 || delta >= 128)) {
+                atomic_inc(&rx_seq_gap_count);
+                k_mutex_unlock(&dispatch_lock);
+                continue; /* Duplicate/old packets cannot keep control alive. */
+            }
+            if (have_last_seq && delta != 1) atomic_inc(&rx_seq_gap_count);
+            last_seq = seq;
+            have_last_seq = true;
+            atomic_inc(&rx_valid_count);
+#if HAVE_CMD_RX_TP
+            gpio_pin_toggle_dt(&cmd_rx_tp);
+#endif
+            if (pi_link_command_is_fresh(&cmd, plausible)) {
+                last_valid_cmd_uptime_ms = k_uptime_get();
+                bool restored = !atomic_get(&link_alive);
+                atomic_set(&link_alive, true);
+                if (restored) pi_link_on_link_restored();
+            }
             pi_link_on_command_received(&cmd, plausible);
+            k_mutex_unlock(&dispatch_lock);
         }
     }
 }
@@ -215,13 +237,15 @@ static void send_heartbeat(void)
     if (zone_override != ZONE_STATE_INIT) {
         hb.zone_state = (uint8_t)zone_override;
     } else {
-        hb.zone_state = (uint8_t)(link_alive ? ZONE_STATE_NORMAL : ZONE_STATE_LINK_LOST);
+        hb.zone_state = (uint8_t)(atomic_get(&link_alive) ? ZONE_STATE_NORMAL : ZONE_STATE_LINK_LOST);
     }
     k_mutex_unlock(&state_lock);
 
     hb.bus_degraded = 0;
 
     pi_link_get_currents(&hb.current_motor_l, &hb.current_motor_r, &hb.current_servo);
+
+    pi_link_customize_heartbeat(&hb);
 
     static uint8_t hb_seq;
     uint8_t frame[LINK_FRAME_MAX_SIZE];
@@ -243,13 +267,14 @@ static void heartbeat_thread_fn(void *a, void *b, void *c)
 
     while (1) {
        
-        if (link_alive) {
-            int64_t elapsed = k_uptime_get() - last_valid_cmd_uptime_ms;
-            if (elapsed > LINK_TIMEOUT_MS) {
-                link_alive = false;
-                pi_link_on_link_lost();
-            }
+        k_mutex_lock(&dispatch_lock, K_FOREVER);
+        int64_t age = k_uptime_get() - last_valid_cmd_uptime_ms;
+        if (atomic_get(&link_alive) && age >= LINK_TIMEOUT_MS) {
+            atomic_set(&link_alive, false);
+            atomic_set(&last_timeout_age_ms, (atomic_val_t)age);
+            pi_link_on_link_lost();
         }
+        k_mutex_unlock(&dispatch_lock);
 
         send_heartbeat();
 
@@ -301,7 +326,7 @@ void pi_link_init(void)
     uart_irq_rx_enable(pi_uart_dev);
 
     last_valid_cmd_uptime_ms = k_uptime_get();
-    link_alive = false; // ZONE_STATE_INIT equivalent until first valid frame 
+    atomic_set(&link_alive, false); // No valid control source at startup
 
     k_thread_start(parser_tid);
     k_thread_start(heartbeat_tid);
@@ -311,9 +336,11 @@ void pi_link_init(void)
 
 bool pi_link_is_alive(void)
 {
-    return link_alive;
+    return atomic_get(&link_alive) != 0;
 }
 
-uint32_t pi_link_rx_valid_count(void)     { return rx_valid_count; }
-uint32_t pi_link_rx_crc_fail_count(void)  { return rx_crc_fail_count; }
-uint32_t pi_link_rx_seq_gap_count(void)   { return rx_seq_gap_count; }
+uint32_t pi_link_rx_valid_count(void)     { return (uint32_t)atomic_get(&rx_valid_count); }
+uint32_t pi_link_rx_crc_fail_count(void)  { return (uint32_t)atomic_get(&rx_crc_fail_count); }
+uint32_t pi_link_rx_seq_gap_count(void)   { return (uint32_t)atomic_get(&rx_seq_gap_count); }
+
+uint32_t pi_link_last_timeout_age_ms(void) { return (uint32_t)atomic_get(&last_timeout_age_ms); }

@@ -12,6 +12,9 @@
 #include "brake.h"
 #include "encoder.h"
 #include "speed_control.h"
+#ifdef LAB2_UART_DIAGNOSTIC
+#include "pi_link.h"
+#endif
 
 //
 //	SERVO
@@ -353,6 +356,12 @@ int main(void)
 	int encoder_rc = encoders_init();
 	int motor_rc = speed_control_init();
 	printk("Encoder init: %d; use encoder status / zero / sign\n", encoder_rc);
+#ifdef LAB2_UART_DIAGNOSTIC
+	pi_link_init();
+	/* Bench mode is deliberately not vehicle-ready. */
+	pi_link_set_zone_state_override(ZONE_STATE_SYS_ERROR);
+	printk("Pi UART test mode: receive/report only; no remote actuation.\n");
+#endif
 
 	printk("Closed-loop drive is disarmed. Use drive arm, then drive throttle.\n");
 	printk("Motor test shell ready. Type 'motor' for commands.\n");

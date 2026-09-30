@@ -137,3 +137,9 @@
 
 /* PWM update scope marker for the closed-loop motor path. */
 / { zephyr,user { pwm-set-test-gpios = <&gpioc 11 GPIO_ACTIVE_HIGH>; }; };
+
+/* USART1 is separate from the USART2 ST-LINK console. */
+/ {
+ chosen { pilink,uart = &usart1; };
+ zephyr,user { cmd-rx-test-gpios = <&gpioc 10 GPIO_ACTIVE_HIGH>; };
+};
