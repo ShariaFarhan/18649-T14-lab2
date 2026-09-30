@@ -6,16 +6,16 @@ Proposed shared pinout for **one NUCLEO-F401RE / STM32F401RET6**. Checked agains
 
 ## STM32 signal table
 
-Left/right are viewed from the car's forward-facing direction.
+Left/right are viewed from the car's forward-facing direction. On 2026-09-30, the user identified bridge A as the physical right motor and bridge B as left. The logical motor mapping is corrected here; encoder wiring/signs are unchanged.
 
 | Signal | STM32 pin | Board header | Peripheral / role |
 |---|---|---|---|
-| MOTOR_L_PWM → driver ENA | PA6 | CN10-13 (D12) | TIM3_CH1, AF2 |
-| MOTOR_R_PWM → driver ENB | PA7 | CN10-15 (D11) | TIM3_CH2, AF2 |
-| MOTOR_L_IN1 → driver IN1 | PB12 | CN10-16 | GPIO output |
-| MOTOR_L_IN2 → driver IN2 | PB13 | CN10-30 | GPIO output |
-| MOTOR_R_IN1 → driver IN3 | PB14 | CN10-28 | GPIO output |
-| MOTOR_R_IN2 → driver IN4 | PB15 | CN10-26 | GPIO output |
+| MOTOR_L_PWM → driver ENB | PA7 | CN10-15 (D11) | TIM3_CH2, AF2 |
+| MOTOR_R_PWM → driver ENA | PA6 | CN10-13 (D12) | TIM3_CH1, AF2 |
+| MOTOR_L_IN1 → driver IN3 | PB14 | CN10-28 | GPIO output |
+| MOTOR_L_IN2 → driver IN4 | PB15 | CN10-26 | GPIO output |
+| MOTOR_R_IN1 → driver IN1 | PB12 | CN10-16 | GPIO output |
+| MOTOR_R_IN2 → driver IN2 | PB13 | CN10-30 | GPIO output |
 | ENCODER_L_A | PA0 | CN7-28 (A0) | TIM2_CH1, AF1; or GPIO input |
 | ENCODER_L_B | PA1 | CN7-30 (A1) | TIM2_CH2, AF1; or GPIO input |
 | ENCODER_R_A | PB6 | CN10-17 (D10) | TIM4_CH1, AF2; or GPIO input |
@@ -47,15 +47,15 @@ PWM_OUT, DIR_A, SRV and FL/FR/RL/RR test points are taps of the actual signals a
 
 ## Pi-to-STM32 wiring
 
-Selected baseline: **3.3 V GPIO UART, 115200 baud, 8N1**, with Pi 4 and STM32 independently powered.
+Selected baseline: **3.3 V GPIO UART, 115200 baud, 8N1**, with Pi 4 / Pi 5 and STM32 independently powered.
 
-| Raspberry Pi 4 | Connect to Nucleo |
+| Raspberry Pi 4 / Pi 5 | Connect to Nucleo |
 |---|---|
 | GPIO14 / TXD, physical pin 8 | PA10 / RX, CN10-33 |
 | GPIO15 / RXD, physical pin 10 | PA9 / TX, CN10-21 |
 | GND, physical pin 6 | GND, CN7-20 |
 
-Enable the Pi UART, disable its serial login console, and use `/dev/serial0` after verifying the device mapping. Sharia's `pi/link_forwarder.c` currently specifies `/dev/ttyUSB0` with a TODO: change it for the GPIO-UART baseline. Keep USART2 for debug logs; do not print console text onto the USART1 binary protocol link.
+Enable the GPIO UART and ensure no login console uses that device. On Pi 4, verify the `/dev/serial0` mapping. On the tested Pi 5, `sudo dtoverlay uart0-pi5` enables GPIO14/15 as `/dev/ttyAMA0` until reboot; `/dev/serial0` points to the separate debug UART (`ttyAMA10`) and must not be used for these wires. Sharia's `pi/link_forwarder.c` currently specifies `/dev/ttyUSB0` with a TODO: change it for the GPIO-UART baseline. Keep USART2 for debug logs; do not print console text onto the USART1 binary protocol link.
 
 If the team already has a **3.3 V USB-to-TTL adapter**, it can instead connect adapter TX → PA10, adapter RX → PA9, adapter GND → common GND. Then the Pi device may be `/dev/ttyUSB0` (verify it). Do not connect both UART sources simultaneously. Do not connect an adapter's power pin or an RS-232-voltage signal to these GPIOs.
 
@@ -65,19 +65,19 @@ If the team already has a **3.3 V USB-to-TTL adapter**, it can instead connect a
 |---|---|---|
 | 1 | GND | Common GND |
 | 2 | GND | Common GND |
-| 3 | UDP_RX | Pi GPIO23, physical pin 16; proposed software marker |
-| 4 | CMD_TX | Pi GPIO24, physical pin 18; proposed software marker |
+| 3 | UDP_RX | Pi GPIO23, physical pin 16; UDP receive marker |
+| 4 | CMD_TX | Pi GPIO24, physical pin 18; UART-send marker |
 | 5 | CMD_RX | STM32 PC10 / CN7-1 |
 | 6 | PWM_SET | STM32 PC11 / CN7-2 |
-| 7 | PWM_OUT | Tap left motor PWM, PA6 / CN10-13 |
-| 8 | DIR_A | Tap left motor IN1, PB12 / CN10-16 |
+| 7 | PWM_OUT | Tap left motor PWM, PA7 / CN10-15 |
+| 8 | DIR_A | Tap left motor IN1, PB14 / CN10-28 |
 | 9 | SRV | Tap PA8 / CN10-23 |
 | 10 | FL | Tap PC6 / CN10-4 |
 | 11 | FR | Tap PC7 / CN10-19 |
 | 12 | RL | Tap PC8 / CN10-2 |
 | 13 | RR | Tap PC9 / CN10-1 |
 
-One signal per connected breadboard row, in the handout's order. The marker GPIOs still need software toggles. Right motor PWM/IN2/IN3/IN4 remain accessible for additional measurements. If the selected brake truth table changes another direction pin, probe that actual pin as well.
+One signal per connected breadboard row, in the handout's order. The four software markers are implemented in the running Python/STM32 bench path. PWM_OUT taps the left motor (PA7), and PWM_SET marks its final requested duty write. With LOW/LOW dynamic braking and EN HIGH, DIR_A taps PB14: it changes from HIGH in forward drive to LOW in braking; PB15 stays LOW. For reverse-to-brake tests, PB15 is the changing input instead.
 
 ## Devicetree changes required
 
@@ -92,7 +92,7 @@ One signal per connected breadboard row, in the handout's order. The marker GPIO
 | Direction, lamps, test markers | GPIO definitions according to the signal table |
 | Conflicting defaults | Disable unused SPI1, SPI2 and I2C3; disable default PWM2/`pwmleds` usage before assigning TIM2 to an encoder; replace the default ADC PA0 assignment |
 
-The exact timer encoder binding depends on the team's Zephyr version; verify that version and build before treating an overlay as complete. Pin multiplexing availability alone does not mean the peripheral driver is configured. This document does not change or push the repository's empty overlay.
+The current overlay has been built with Zephyr 4.1.0. Keep the encoder, UART, PWM and test-point assignments synchronized with the source; listed current-sensor ADC pins remain reserved until current sensing is integrated.
 
 ## Electrical connections to confirm on the actual kit
 
@@ -110,3 +110,24 @@ The exact timer encoder binding depends on the team's Zephyr version; verify tha
 - [Zephyr STM32F401 pin multiplexing definitions](https://github.com/zephyrproject-rtos/hal_stm32/blob/main/dts/st/f4/stm32f401r%28d-e%29tx-pinctrl.dtsi)
 - [Raspberry Pi UART configuration](https://www.raspberrypi.com/documentation/computers/configuration.html#configuring-uarts)
 - Lab2 handout: single STM32, serial command/status link, three current sensors, four lamps and the 13-row test-point board.
+
+## UART transport bench profile
+
+Build with `-DLAB2_UART_DIAGNOSTIC=ON -DEXTRA_CONF_FILE=uart_diagnostic.conf`.
+This preserves the COM9 motor/servo/encoder shell and enables USART1 receive + heartbeat.
+Incoming UART commands are printed only; they do not actuate outputs.
+The diagnostic heartbeat reports state 4 (not vehicle-ready) and 65535 for unavailable currents.
+
+On Pi: `python3 tests/pi_uart_bench.py /dev/ttyAMA0`.
+On STM32 console: `link status`, then `drive status`.
+The Pi script sends 26 valid commands and one deliberately bad CRC.
+Expect 26 accepted, one rejected, correct decoded values, and link-lost after silence.
+This checks this branch's legacy 9-byte command payload only, not the separate v2 integration forwarder or UDP path.
+
+Bench result (2026-09-30): Pi 5 GPIO UART at 115200 8N1 + NUCLEO-F401RE.
+STM32 accepted 26/26 valid commands, rejected the one corrupt frame, and reported zero sequence gaps.
+Decoded values matched 1234 / 5678 / 90 / buttons 5 / flags 1.
+Pi received 85 CRC-valid heartbeats with zero sequence gaps during this short test.
+After silence, STM32 reported link-lost; this is functional timeout observation, not a measured deadline bound.
+COM9 remained independently usable after reconnecting ST-LINK USB.
+Drive status stayed disarmed with brake on. GPIO UART enablement on Pi is runtime-only until made persistent.

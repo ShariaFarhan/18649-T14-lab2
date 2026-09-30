@@ -80,6 +80,15 @@ static int set_pulse_us(uint32_t pulse_us)
     return rc;
 }
 
+int servo_prepare(void)
+{
+    if (!pwm_is_ready_dt(&servo_pwm)) return -ENODEV;
+    servo_initialized = true;
+    int rc = servo_disable();
+    if (rc) servo_initialized = false;
+    return rc;
+}
+
 int servo_init(void)
 {
     int rc;

@@ -38,6 +38,7 @@ static bool phase_on;
 static bool turn_crossed;
 static bool initialized;
 static int16_t last_steering;
+static int64_t next_edge_ms;
 
 static int apply_outputs(enum blinker_mode mode, bool on)
 {
@@ -74,12 +75,21 @@ static void blink_work_handler(struct k_work *work)
 		k_spin_unlock(&state_lock, key);
 		return;
 	}
-	phase_on = !phase_on;
+	int64_t now = k_uptime_get();
+	if (now < next_edge_ms) {
+		k_spin_unlock(&state_lock, key);
+		return; /* Discard queued work from a previous light mode. */
+	}
+	uint32_t half_period = current_mode == BLINKER_MODE_HAZARD ?
+		HAZARD_HALF_PERIOD_MS : TURN_HALF_PERIOD_MS;
+	uint32_t edges = 1U + (uint32_t)((now - next_edge_ms) / half_period);
+	next_edge_ms += (int64_t)edges * half_period;
+	if (edges & 1U) phase_on = !phase_on;
 	mode = current_mode;
 	on = phase_on;
-	k_spin_unlock(&state_lock, key);
-
+	/* These four outputs are local STM32 GPIOs; serialize them with mode changes. */
 	(void)apply_outputs(mode, on);
+	k_spin_unlock(&state_lock, key);
 }
 
 K_WORK_DEFINE(blink_work, blink_work_handler);
@@ -157,9 +167,11 @@ int blinkers_set_mode(enum blinker_mode mode)
 	current_mode = mode;
 	phase_on = mode != BLINKER_MODE_OFF;
 	turn_crossed = false;
+	half_period_ms = mode == BLINKER_MODE_HAZARD ?
+		HAZARD_HALF_PERIOD_MS : TURN_HALF_PERIOD_MS;
+	next_edge_ms = k_uptime_get() + half_period_ms;
+	rc = apply_outputs(mode, phase_on);
 	k_spin_unlock(&state_lock, key);
-
-	rc = apply_outputs(mode, mode != BLINKER_MODE_OFF);
 	if (rc != 0 || mode == BLINKER_MODE_OFF) {
 		return rc;
 	}

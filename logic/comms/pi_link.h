@@ -8,8 +8,14 @@
 
 //Starts the UART RX ISR + ring buffer, call once from main()
 void pi_link_init(void);
+void pi_link_on_command_received(const cmd_payload_t *cmd, bool plausible);
+/* Optional test-profile status customization; normal firmware leaves this empty. */
+void pi_link_customize_heartbeat(hb_payload_t *hb);
 
 
+bool pi_link_command_is_fresh(const cmd_payload_t *cmd, bool plausible);
+void pi_link_on_invalid_frame(void);
+uint32_t pi_link_last_timeout_age_ms(void);
 void pi_link_on_link_lost(void);
 void pi_link_on_link_restored(void);
 

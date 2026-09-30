@@ -9,6 +9,12 @@
 #include "blinkers.h"
 #include "servo.h"
 #include "motor_control.h"
+#include "brake.h"
+#include "encoder.h"
+#include "speed_control.h"
+#ifdef LAB2_UART_DIAGNOSTIC
+#include "pi_link.h"
+#endif
 
 //
 //	SERVO
@@ -258,7 +264,7 @@ SHELL_CMD_REGISTER(blinker, &blinker_commands, "Blinker test commands", NULL);
 //
 static int cmd_motor_init(const struct shell *sh, size_t argc, char **argv)
 {
-    int rc = motor_init();
+    int rc = speed_control_manual_init();
     if (rc == 0) {
         shell_print(sh, "Motor driver initialized successfully.");
     } else {
@@ -313,7 +319,7 @@ static int cmd_motor_set(const struct shell *sh, size_t argc, char **argv)
     uint32_t duty_cycle = (uint32_t)parsed_duty;
 
     /* Execute Driver Call */
-    int rc = sys_motor_set(motor, duty_cycle, dir);
+    int rc = speed_control_manual_set(motor, duty_cycle, dir);
     if (rc == 0) {
         if (dir == FREE || dir == STOP) {
             shell_print(sh, "Motor %s: %s (duty argument ignored).", argv[1],
@@ -328,7 +334,21 @@ static int cmd_motor_set(const struct shell *sh, size_t argc, char **argv)
     return rc;
 }
 
+static int cmd_motor_brake(const struct shell *sh, size_t argc, char **argv)
+{
+    ARG_UNUSED(argc);
+    ARG_UNUSED(argv);
+    int rc = speed_control_set_brake(true);
+    if (rc != 0) {
+        shell_error(sh, "Braking failed on at least one motor: %d", rc);
+    } else {
+        shell_print(sh, "Both motors: dynamic braking");
+    }
+    return rc;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor,
+    SHELL_CMD(brake, NULL, "Dynamically brake both motors", cmd_motor_brake),
     SHELL_CMD(init, NULL, "Initialize motor driver pins & PWM", cmd_motor_init),
     SHELL_CMD(set, NULL, "Set motor: motor set <left|right> <forward|backward|free|stop> <duty_cycle>", cmd_motor_set),
     SHELL_SUBCMD_SET_END
@@ -343,8 +363,17 @@ SHELL_CMD_REGISTER(motor, &sub_motor, "Motor driver control commands", NULL);
 int main(void)
 {
 	int blinker_rc = blinkers_init();
-	int motor_rc = motor_init();
+	int encoder_rc = encoders_init();
+	int motor_rc = speed_control_init();
+	printk("Encoder init: %d; use encoder status / zero / sign\n", encoder_rc);
+#ifdef LAB2_UART_DIAGNOSTIC
+	pi_link_init();
+	/* Bench mode is deliberately not vehicle-ready. */
+	pi_link_set_zone_state_override(ZONE_STATE_SYS_ERROR);
+	printk("Pi UART test mode: receive/report only; no remote actuation.\n");
+#endif
 
+	printk("Closed-loop drive is disarmed. Use drive arm, then drive throttle.\n");
 	printk("Motor test shell ready. Type 'motor' for commands.\n");
 	if (motor_rc != 0) {
 			printk("Motor initialization failed: %d\n", motor_rc);

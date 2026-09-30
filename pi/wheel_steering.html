@@ -1,0 +1,38 @@
+<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>右轮速度 · 转向 · 灯光</title><style>
+body{font:17px system-ui;background:#f3f5fa;color:#18304b;padding:30px}main{max-width:620px;margin:auto;background:white;border-radius:16px;padding:28px}h1{font-size:26px}p{line-height:1.6;color:#657188}button{font:17px system-ui;padding:14px;border:0;border-radius:10px;cursor:pointer;color:white}.buttons{display:flex;gap:16px}.buttons button{flex:1}#start{background:#2460cd}#stop{background:#b32640}.box{background:#f0f4fa;padding:18px;border-radius:10px;line-height:2;margin:18px 0}#error{color:#b32640}
+</style><main><h1>右轮速度 · 转向 · 灯光</h1><p>G920 → Pi 4 → STM32 · 左电机禁用</p>
+<div class="box"><div id="wheel">检测方向盘…</div><div id="raw">原始值：—</div><div id="output">STM32：等待数据</div><div id="lights">灯光：等待回传</div><div id="keys">LSB / RSB：未按下</div></div>
+<div class="buttons"><button id="start">开始跟随</button><button id="stop">停止、回中并关灯</button></div>
+<div class="box"><div id="drive">右电机：等待固件回传</div><div id="speed">目标 — RPM · 实测 — RPM · PWM —%</div><div id="driveNotice"></div></div>
+<div class="buttons"><button id="arm" style="background:#2460cd" disabled>启用右电机</button><button id="disarm" style="background:#b32640">右电机停止</button></div>
+<p>先开始跟随，松开两个踏板，再启用右电机。油门目标 0～280 RPM；刹车优先。首次起转辅助 40%／最长约 150 ms。</p>
+<p id="mode">当前只读取，不控制舵机。</p><p id="error"></p>
+<p>当前测试范围 <strong>1000–2000 μs</strong>，中位 1500 μs。先轻轻左右转动，确认方向。</p>
+<p><strong>LSB 左闪 · RSB 右闪</strong><br>再按同侧关闭，按另一侧切换。前后同步，亮 0.5 秒、灭 0.5 秒。转过阈值后回正也会关闭。</p>
+<p>左电机及左编码器保持断开；右轮架空后再接通动力。当前为右轮闭环测试，低速和带载表现仍需调试。使用 Windows 原生读取，不发送方向盘力反馈。</p></main>
+<script>
+const el=id=>document.getElementById(id);async function post(path){let r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});if(!r.ok)throw Error(await r.text());return r.json()}
+el('start').onclick=()=>post('/start').catch(e=>el('error').textContent=e.message);
+el('stop').onclick=()=>post('/stop').catch(e=>el('error').textContent=e.message);
+el('arm').onclick=()=>post('/right_enable').then(()=>el('error').textContent='').catch(e=>el('error').textContent=e.message);
+el('disarm').onclick=()=>post('/right_disable').catch(e=>el('error').textContent=e.message);
+async function poll(){
+ try{
+  let s=await post('/status');
+  el('wheel').textContent=s.wheel_ok?'方向盘已连接':'方向盘未连接';
+  el('raw').textContent=s.raw?`方向盘 X=${s.raw.x} · 油门 Z=${s.raw.z} · 刹车 R=${s.raw.r}`:'原始值：—';
+  el('keys').textContent=s.raw?`LSB：${s.raw.buttons&512?'按下':'松开'} · RSB：${s.raw.buttons&256?'按下':'松开'}`:'按钮：未连接';
+  el('mode').textContent=s.enabled?'跟随中；停止或失联时回中、关灯。':'已停止发送；点“开始跟随”启用转向与灯光。';
+  el('output').textContent=s.stm?`STM32：${s.stm.pulse_us} μs · 转向 ${s.stm.percent}% · 状态 ${s.stm.zone}`:'STM32：等待回传';
+  el('lights').textContent=s.stm&&s.stm.light_mode!=null?`灯光：${['关闭','左闪','右闪','双闪'][s.stm.light_mode]} · 输出 ${['左前','右前','左后','右后'].filter((_,i)=>s.stm.light_pins&(1<<i)).join('、')||'全灭'}`:'灯光：等待回传';
+  let d=s.stm&&s.stm.right_drive_available?s.stm:null;
+  el('arm').disabled=!(s.enabled&&s.wheel_ok&&d&&d.zone===1&&!d.right_fault&&!s.right_enable&&s.raw.z>=64225&&s.raw.r>=64225);
+  el('drive').textContent=d?`右电机：${d.right_fault?'故障，请停止并检查':d.right_armed?(d.right_brake?'刹车':d.right_boost?'启动辅助':'已启用'):'未启用'}`:'右电机：固件未就绪';
+  el('driveNotice').textContent=s.right_notice||'';
+  el('speed').textContent=d?`目标 ${d.target_rpm.toFixed(1)} RPM · 实测 ${d.right_rpm.toFixed(1)} RPM · PWM ${d.right_pwm}%`:'目标 — RPM · 实测 — RPM · PWM —%';
+ }catch(e){el('output').textContent='控制服务未连接';el('lights').textContent='灯光：状态未知';el('arm').disabled=true;el('drive').textContent='右电机：状态未知'}
+ setTimeout(poll,100)
+}
+window.addEventListener('pagehide',()=>navigator.sendBeacon('/stop',new Blob(['{}'],{type:'application/json'})));poll();
+</script></html>

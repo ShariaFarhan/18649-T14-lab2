@@ -40,20 +40,20 @@
 	motor_pwms {
 		compatible = "pwm-leds";
 
-		motor_l_pwm: motor_l_pwm { pwms = <&pwm3 1 PWM_KHZ(20) PWM_POLARITY_NORMAL>; };
-		motor_r_pwm: motor_r_pwm { pwms = <&pwm3 2 PWM_KHZ(20) PWM_POLARITY_NORMAL>; };
+		motor_l_pwm: motor_l_pwm { pwms = <&pwm3 2 PWM_KHZ(20) PWM_POLARITY_NORMAL>; };
+		motor_r_pwm: motor_r_pwm { pwms = <&pwm3 1 PWM_KHZ(20) PWM_POLARITY_NORMAL>; };
 	};
 
 	motor_direction {
 		compatible = "gpio-leds";
 
-		/* Left Motor Direction GPIOs (PB12, PB13) */
-		motor_l_in1: motor_l_in1 { gpios = <&gpiob 12 GPIO_ACTIVE_HIGH>; };
-		motor_l_in2: motor_l_in2 { gpios = <&gpiob 13 GPIO_ACTIVE_HIGH>; };
+		/* Physical left wheel: bridge B (PB14, PB15), confirmed during bench test. */
+		motor_l_in1: motor_l_in1 { gpios = <&gpiob 14 GPIO_ACTIVE_HIGH>; };
+		motor_l_in2: motor_l_in2 { gpios = <&gpiob 15 GPIO_ACTIVE_HIGH>; };
 
-		/* Right Motor Direction GPIOs (PB14, PB15) */
-		motor_r_in1: motor_r_in1 { gpios = <&gpiob 14 GPIO_ACTIVE_HIGH>; };
-		motor_r_in2: motor_r_in2 { gpios = <&gpiob 15 GPIO_ACTIVE_HIGH>; };
+		/* Physical right wheel: bridge A (PB12, PB13). */
+		motor_r_in1: motor_r_in1 { gpios = <&gpiob 12 GPIO_ACTIVE_HIGH>; };
+		motor_r_in2: motor_r_in2 { gpios = <&gpiob 13 GPIO_ACTIVE_HIGH>; };
 	};
 
 };
@@ -85,4 +85,61 @@
 		pinctrl-0 = <&tim3_ch1_pa6 &tim3_ch2_pa7>;
 		pinctrl-names = "default";
 	};
+};
+/* Lab2 wheel encoders: 1320 counts per wheel revolution, supported by ten-turn measurements.
+ * Keep Sidrisha's motor TIM3 and Ryan's servo TIM1 assignments unchanged. */
+/ {
+ aliases {
+  encoder-left = &encoder_left;
+  encoder-right = &encoder_right;
+ };
+ pwmleds { status = "disabled"; };
+};
+
+/* Default board drivers otherwise claim encoder and motor pins. */
+&pwm2 { status = "disabled"; };
+&spi1 { status = "disabled"; };
+&spi2 { status = "disabled"; };
+&adc1 { status = "disabled"; }; /* PA0 released; future current ADC uses PC2/3/4 */
+
+/* Preserve USART2 debug; reserve the Pi link on PA9/PA10, not PB6/PB7. */
+&usart1 {
+ pinctrl-0 = <&usart1_tx_pa9 &usart1_rx_pa10>;
+ pinctrl-names = "default";
+ current-speed = <115200>;
+ status = "okay";
+};
+
+&timers2 {
+ status = "okay";
+ st,prescaler = <0>;
+ encoder_left: qdec {
+  status = "okay";
+  pinctrl-0 = <&tim2_ch1_pa0 &tim2_ch2_pa1>;
+  pinctrl-names = "default";
+  st,encoder-mode = <3>; /* Both A/B edges: x4. */
+  st,counts-per-revolution = <1320>;
+  st,input-filter-level = <3>;
+ };
+};
+&timers4 {
+ status = "okay";
+ st,prescaler = <0>;
+ encoder_right: qdec {
+  status = "okay";
+  pinctrl-0 = <&tim4_ch1_pb6 &tim4_ch2_pb7>;
+  pinctrl-names = "default";
+  st,encoder-mode = <3>;
+  st,counts-per-revolution = <1320>;
+  st,input-filter-level = <3>;
+ };
+};
+
+/* Scope markers: shared driver marks final LEFT PWM writes; PWM_OUT taps PA7. */
+/ { zephyr,user { pwm-set-test-gpios = <&gpioc 11 GPIO_ACTIVE_HIGH>; }; };
+
+/* USART1 is separate from the USART2 ST-LINK console. */
+/ {
+ chosen { pilink,uart = &usart1; };
+ zephyr,user { cmd-rx-test-gpios = <&gpioc 10 GPIO_ACTIVE_HIGH>; };
 };
