@@ -1,6 +1,7 @@
 """PC browser -> UDP/8001 -> Pi GPIO UART -> STM32 motor/steering/lighting bench firmware.
 
-Separate from the Logitech UDP/8000 protocol. Python standard library only.
+Separate from the Logitech UDP/8000 protocol. PC uses the standard library;
+Pi additionally uses the installed libgpiod v2 Python bindings for scope markers.
 Run on each host: voltage_bench.py pc|pi --config <private JSON configuration>
 """
 import argparse
@@ -63,9 +64,11 @@ def pi(config):
     import termios
     import tty
     import fcntl
+    from test_points import TestPoints
     fd = os.open(config.get('uart', '/dev/ttyAMA0'), os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     old = termios.tcgetattr(fd)
+    markers = TestPoints()
     udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp.bind(('0.0.0.0', config['udp_port']))
     udp.setblocking(False)
@@ -92,6 +95,7 @@ def pi(config):
             readable, _, _ = select.select([udp, fd], [], [], max(0, next_send-now))
             if udp in readable:
                 data, address = udp.recvfrom(2048)
+                markers.toggle('udp_rx') # Reception edge, before decoding the packet.
                 try:
                     msg = json.loads(data)
                     if not isinstance(msg, dict) or not isinstance(msg.get('key'), str):
@@ -147,22 +151,25 @@ def pi(config):
                 if inject_bad and not stale: throttle = 101 # Explicit out-of-range test for STM32.
                 outgoing = packet(seq, throttle, brake, stale, steering, lights, servo, event,
                                   test_counter, sync_button)
+                markers.toggle('cmd_tx') # Start of the software UART-send operation.
                 if os.write(fd, outgoing) != len(outgoing):
                     raise RuntimeError('Short UART write')
                 seq = (seq+1) & 255
                 next_send = now + 0.02
                 if peer:
                     reply = dict(key=config['key'], stm=hb if now-last_stm <= 0.15 else None,
-                                 pc_stale=now-last_pc > 0.12)
+                                 pc_stale=now-last_pc > 0.12, test_points=markers.snapshot())
                     udp.sendto(json.dumps(reply).encode(), peer)
     finally:
         try:
+            markers.toggle('cmd_tx')
             os.write(fd, packet(seq, 0, 100, True))
             termios.tcdrain(fd)
         finally:
             termios.tcsetattr(fd, termios.TCSANOW, old)
             os.close(fd)
             udp.close()
+            markers.close()
 
 
 PAGE = Path(__file__).with_name('actuator_bench.html').read_text(encoding='utf-8')
@@ -174,7 +181,7 @@ def pc(config):
     udp.connect(destination)
     udp.setblocking(False)
     lock = threading.Lock()
-    state = dict(active=False, command=SAFE_COMMAND, last_browser=0.0, last_pi=0.0, stm=None,
+    state = dict(active=False, command=SAFE_COMMAND, last_browser=0.0, last_pi=0.0, stm=None, test_points=None,
                  source_ready=False, test_counter=0, sync=True, last_test_press=-1.0, bad_input=False)
     done = threading.Event()
     wake = threading.Event()
@@ -200,6 +207,7 @@ def pc(config):
                     if isinstance(reply.get('key'), str) and hmac.compare_digest(reply['key'], config['key']):
                         with lock:
                             state['stm'] = reply.get('stm')
+                            state['test_points'] = reply.get('test_points')
                             state['last_pi'] = time.monotonic()
                             if state['stm'] and state['stm'].get('test_ack') == state['test_counter']:
                                 state['sync'] = False
@@ -269,7 +277,7 @@ def pc(config):
                     online = time.monotonic()-state['last_pi'] < 0.3
                     wake.set()
                     reply = dict(active=state['active'], pi_online=online, button_ready=not state['sync'] and online,
-                                 stm=state['stm'] if online else None)
+                                 stm=state['stm'] if online else None, test_points=state['test_points'] if online else None)
                 self.answer(200, reply)
             except (ValueError, KeyError, TypeError) as exc:
                 self.answer(400, str(exc), 'text/plain')

@@ -65,19 +65,19 @@ If the team already has a **3.3 V USB-to-TTL adapter**, it can instead connect a
 |---|---|---|
 | 1 | GND | Common GND |
 | 2 | GND | Common GND |
-| 3 | UDP_RX | Pi GPIO23, physical pin 16; proposed software marker |
-| 4 | CMD_TX | Pi GPIO24, physical pin 18; proposed software marker |
+| 3 | UDP_RX | Pi GPIO23, physical pin 16; UDP receive marker |
+| 4 | CMD_TX | Pi GPIO24, physical pin 18; UART-send marker |
 | 5 | CMD_RX | STM32 PC10 / CN7-1 |
 | 6 | PWM_SET | STM32 PC11 / CN7-2 |
 | 7 | PWM_OUT | Tap left motor PWM, PA6 / CN10-13 |
-| 8 | DIR_A | Tap left motor IN1, PB12 / CN10-16 |
+| 8 | DIR_A | Tap left motor IN2, PB13 / CN10-30 |
 | 9 | SRV | Tap PA8 / CN10-23 |
 | 10 | FL | Tap PC6 / CN10-4 |
 | 11 | FR | Tap PC7 / CN10-19 |
 | 12 | RL | Tap PC8 / CN10-2 |
 | 13 | RR | Tap PC9 / CN10-1 |
 
-One signal per connected breadboard row, in the handout's order. The marker GPIOs still need software toggles. Right motor PWM/IN2/IN3/IN4 remain accessible for additional measurements. If the selected brake truth table changes another direction pin, probe that actual pin as well.
+One signal per connected breadboard row, in the handout's order. The four software markers are implemented in the running Python/STM32 bench path. PWM_OUT taps the left motor (PA6), and PWM_SET marks its final requested duty write. DIR_A taps PB13: it changes from LOW in forward drive to HIGH in dynamic braking; PB12 stays HIGH and cannot time that transition. For reverse-to-brake tests, PB12 is the changing input instead.
 
 ## Devicetree changes required
 
@@ -92,7 +92,7 @@ One signal per connected breadboard row, in the handout's order. The marker GPIO
 | Direction, lamps, test markers | GPIO definitions according to the signal table |
 | Conflicting defaults | Disable unused SPI1, SPI2 and I2C3; disable default PWM2/`pwmleds` usage before assigning TIM2 to an encoder; replace the default ADC PA0 assignment |
 
-The exact timer encoder binding depends on the team's Zephyr version; verify that version and build before treating an overlay as complete. Pin multiplexing availability alone does not mean the peripheral driver is configured. This document does not change or push the repository's empty overlay.
+The current overlay has been built with Zephyr 4.1.0. Keep the encoder, UART, PWM and test-point assignments synchronized with the source; listed current-sensor ADC pins remain reserved until current sensing is integrated.
 
 ## Electrical connections to confirm on the actual kit
 

@@ -135,7 +135,7 @@
  };
 };
 
-/* PWM update scope marker for the closed-loop motor path. */
+/* Scope markers: shared driver marks final LEFT PWM writes; PWM_OUT taps PA6. */
 / { zephyr,user { pwm-set-test-gpios = <&gpioc 11 GPIO_ACTIVE_HIGH>; }; };
 
 /* USART1 is separate from the USART2 ST-LINK console. */

@@ -42,7 +42,7 @@ Black probe to GND. The readings below are approximate DC averages; a voltmeter 
 - Build STM32 with `-DLAB2_UART_PWM_BENCH=ON -DEXTRA_CONF_FILE=uart_diagnostic.conf`.
 - Pi: `python3 voltage_bench.py pi --config control.json`.
 - PC: `python voltage_bench.py pc --config control.json`.
-- Keep `actuator_bench.html` beside `voltage_bench.py` on both hosts.
+- Keep `actuator_bench.html` beside `voltage_bench.py` on both hosts, and `test_points.py` beside it on Pi. Pi requires libgpiod v2 Python bindings (2.2.0 verified); the PC helper remains standard-library-only.
 - Local private config: ignored `build-uart-bench/control.json`; Pi: `/home/henry/lab2-voltage-bench/control.json`. Do not commit its key.
 - Background helpers are running for this session, not installed as boot services.
 - Pi GPIO UART is `/dev/ttyAMA0`. Repeat `sudo dtoverlay uart0-pi5` after Pi reboot until boot configuration is made persistent.
@@ -106,3 +106,34 @@ No motors or servo connected; board powered by USB, Pi connected through UART.
 - Resuming transmission restored the requested 30% PWM and 1250 us steering.
 - Old button counter after MCU reboot was baselined without triggering a new self-test press.
 - Native state tests cover 49/50 ms debounce, 500/501 ms pair timing, modulo-32 counter wrap, missing events, failed reinitialization, and faults surviving reconnect/sync.
+
+## Handout scope test points
+
+Bring out these 13 rows in order, one signal per connected breadboard row:
+
+| Row | Signal | Board pin | Meaning |
+|---|---|---|---|
+| 1–2 | GND | Common ground | Two ground probe rows |
+| 3 | UDP_RX | Pi GPIO23, physical 16 | Toggle immediately after receiving a UDP datagram, before decoding |
+| 4 | CMD_TX | Pi GPIO24, physical 18 | Toggle immediately before writing a command frame to UART |
+| 5 | CMD_RX | STM32 PC10, CN7-1 | Toggle after complete frame CRC/length/sequence acceptance, before command handling |
+| 6 | PWM_SET | STM32 PC11, CN7-2 | Toggle immediately after a successful final LEFT motor timer write |
+| 7 | PWM_OUT | PA6, CN10-13 | Actual left motor PWM |
+| 8 | DIR_A | PB13, CN10-30 | Actual left IN2: LOW forward, HIGH brake |
+| 9 | SRV | PA8, CN10-23 | Actual steering PWM |
+| 10 | FL | PC6, CN10-4 | Actual front-left output |
+| 11 | FR | PC7, CN10-19 | Actual front-right output |
+| 12 | RL | PC8, CN10-2 | Actual rear-left output |
+| 13 | RR | PC9, CN10-1 | Actual rear-right output |
+
+The seven actuator signals are physical taps, not extra software GPIOs. DIR_A uses PB13 instead of the previously proposed PB12 because PB12 has no edge when forward drive changes to the current brake mode.
+
+For throttle: scope CMD_RX against PWM_SET, then PWM_SET against PWM_OUT. For brake: scope CMD_RX against DIR_A. For steering/lights: scope CMD_RX against SRV or the selected lamp output. Repeat measurements under load; code/edge counts alone do not establish the timing deadline.
+
+PWM_SET is anchored to the same LEFT channel as PWM_OUT. It marks the final requested duty (including coast/brake), not the temporary EN-disable write used while changing direction. The driver-level hook covers both the bench and PI code paths. Right-channel writes do not add a second edge on this marker.
+
+UDP_RX also marks subsequently rejected datagrams, which have no matching command. CMD_TX includes periodic repeats and stale/safe frames. Its edge marks the software write call, not the physical UART start bit; kernel/driver delay is included before CMD_RX. Future real-wheel forwarding must reuse these hooks; this verifies the active UDP/8001 bench path, not the legacy C forwarder.
+
+Both markers start LOW. Pi requests GPIO23/24 exclusively and reads back levels; missing/busy GPIO markers stop the relay instead of silently omitting instrumentation. STM32 initialization failures prevent normal operation. `bench status` reports CMD_RX/PWM_SET edge counts and marker errors. Pi counts and readback are available under `test_points` in the local `/status` response.
+
+Verification of the scope-marker update (2026-09-30): both the integrated bench and default PI/manual firmware profiles compiled. Motor/brake hook-order tests and speed-controller regression tests passed. Pi GPIO23/24 were claimed on the RP1 chip, toggled, and read back at both levels; running readback matched counter parity. STM32 CMD_RX/PWM_SET counts advanced with zero marker errors. Live self-test, invalid-input and recovery checks passed after instrumentation. This verifies instrumentation behavior, not oscilloscope timing acceptance.

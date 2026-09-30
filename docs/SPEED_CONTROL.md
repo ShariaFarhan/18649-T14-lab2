@@ -35,7 +35,7 @@ the resulting PWM; it must not apply another throttle deadband.
 The loop sleeps approximately 10ms and uses measured elapsed time, not a fixed
 assumed interval. New input applies synchronously instead of waiting for the
 next loop; the actual 2ms requirement still needs an oscilloscope measurement.
-PWM_SET is PC11 / CN7-2, toggled after the two motor drive updates. While braking,
+PWM_SET is PC11 / CN7-2, now toggled in the shared motor driver immediately after each successful final LEFT timer write (matching PWM_OUT on PA6). The control loop must not toggle it a second time. While braking,
 the reported `drive_pwm=0` means zero propulsion; EN is held HIGH for dynamic brake.
 
 Initial tuning in `speed_pi.c`: Kp=0.4 duty-percent/RPM, Ki=0.8

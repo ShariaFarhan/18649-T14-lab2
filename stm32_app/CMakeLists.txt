@@ -3,6 +3,9 @@ cmake_minimum_required(VERSION 3.28.0)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(lab2)
 
+target_sources(app PRIVATE ../logic/instrumentation/test_points.c)
+target_include_directories(app PRIVATE ../logic/instrumentation)
+
 option(LAB2_UART_PWM_BENCH "Remote fixed-PWM voltage test" OFF)
 if(LAB2_UART_PWM_BENCH)
     target_sources(app PRIVATE

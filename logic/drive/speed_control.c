@@ -12,8 +12,6 @@ static struct speed_status status;
 static struct speed_pi controller;
 static uint64_t last_us;
 static uint32_t no_motion_ms[2];
-static const struct gpio_dt_spec pwm_set_tp =
-    GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), pwm_set_test_gpios);
 
 static uint64_t now_us(void){return k_ticks_to_us_floor64(k_uptime_ticks());}
 static void reset_loop(void){
@@ -43,7 +41,6 @@ static int update_locked(void){
         reset_loop();status.duty_percent=0;
         int a=sys_motor_set(LEFT_MOTOR,0,FREE);
         int b=sys_motor_set(RIGHT_MOTOR,0,FREE);
-        (void)gpio_pin_toggle_dt(&pwm_set_tp);
         return (a||b)?fail_locked(SPEED_FAULT_OUTPUT):0;
     }
     struct encoder_snapshot sample;
@@ -70,7 +67,6 @@ static int update_locked(void){
     }
     int a=sys_motor_set(LEFT_MOTOR,status.duty_percent,FORWARD);
     int b=sys_motor_set(RIGHT_MOTOR,status.duty_percent,FORWARD);
-    (void)gpio_pin_toggle_dt(&pwm_set_tp);
     return (a||b)?fail_locked(SPEED_FAULT_OUTPUT):0;
 }
 static void loop(void *a,void *b,void *c){
@@ -88,8 +84,6 @@ int speed_control_init(void){
     k_mutex_lock(&drive_lock,K_FOREVER);
     if(initialized){k_mutex_unlock(&drive_lock);return -EALREADY;}
     int rc=motor_init();
-    if(!rc && !gpio_is_ready_dt(&pwm_set_tp))rc=-ENODEV;
-    if(!rc)rc=gpio_pin_configure_dt(&pwm_set_tp,GPIO_OUTPUT_INACTIVE);
     if(!rc){status.brake=true;rc=brake_locked();}
     if(!rc)initialized=true;
     k_mutex_unlock(&drive_lock);

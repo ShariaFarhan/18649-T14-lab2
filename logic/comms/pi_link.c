@@ -11,6 +11,7 @@
 
 #include "pi_link.h"
 #include "link_parser.h"
+#include "test_points.h"
 
 
 
@@ -19,15 +20,6 @@
 BUILD_ASSERT(DT_NODE_HAS_STATUS(PI_UART_NODE, okay),
              "pilink,uart chosen node missing/disabled");
 static const struct device *const pi_uart_dev = DEVICE_DT_GET(PI_UART_NODE);
-
-//TODO: CMD_RX scope test point 
-#define TP_NODE DT_PATH(zephyr_user)
-#if DT_NODE_EXISTS(TP_NODE) && DT_NODE_HAS_PROP(TP_NODE, cmd_rx_test_gpios)
-#define HAVE_CMD_RX_TP 1
-static const struct gpio_dt_spec cmd_rx_tp = GPIO_DT_SPEC_GET(TP_NODE, cmd_rx_test_gpios);
-#else
-#define HAVE_CMD_RX_TP 0
-#endif
 
 //timing params
 #define HEARTBEAT_PERIOD_MS   20   
@@ -202,9 +194,11 @@ static void parser_thread_fn(void *a, void *b, void *c)
             last_seq = seq;
             have_last_seq = true;
             atomic_inc(&rx_valid_count);
-#if HAVE_CMD_RX_TP
-            gpio_pin_toggle_dt(&cmd_rx_tp);
-#endif
+            if (test_points_command_received()) {
+                pi_link_on_invalid_frame();
+                k_mutex_unlock(&dispatch_lock);
+                continue;
+            }
             if (pi_link_command_is_fresh(&cmd, plausible)) {
                 last_valid_cmd_uptime_ms = k_uptime_get();
                 bool restored = !atomic_get(&link_alive);
@@ -308,17 +302,10 @@ void pi_link_init(void)
         return;
     }
 
-#if HAVE_CMD_RX_TP
-    if (!gpio_is_ready_dt(&cmd_rx_tp)) {
-        printk("[pi_link] WARNING: CMD_RX test-point GPIO not ready\n");
-    } else {
-        gpio_pin_configure_dt(&cmd_rx_tp, GPIO_OUTPUT_INACTIVE);
+    if (test_points_init()) {
+        printk("[pi_link] FATAL: scope test-point GPIO initialization failed\n");
+        return;
     }
-#else
-    printk("[pi_link] NOTE: no CMD_RX test point defined in devicetree -- "
-           "add cmd-rx-test-gpios under zephyr,user in your board overlay "
-           "if you need to scope it (see the Part 2 test-point table).\n");
-#endif
 
     uart_irq_rx_disable(pi_uart_dev);
     uart_irq_tx_disable(pi_uart_dev);

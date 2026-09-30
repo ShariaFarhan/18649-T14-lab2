@@ -1,4 +1,5 @@
 #include "motor_control.h"
+#include "test_points.h"
 
 #include <errno.h>
 #include <zephyr/device.h>
@@ -40,7 +41,8 @@ static const struct motor_attr motors[NUM_MOTORS] = {
 
 int motor_init(void)
 {
-    int rc;
+    int rc = test_points_init();
+    if (rc != 0) return rc;
 
     for (size_t i = 0; i < NUM_MOTORS; i++) {
         /* Verify hardware readiness */
@@ -84,6 +86,7 @@ int motor_brake(motor_mapping_t motor)
 
     /* Pulse == period means EN stays HIGH, not a forward-drive command. */
     rc = pwm_set_pulse_dt(&m->pwm, m->pwm.period);
+    if (rc == 0 && motor == LEFT_MOTOR) rc = test_points_pwm_written();
     if (rc == 0) return 0;
 
 fail:
@@ -152,6 +155,7 @@ int sys_motor_set(motor_mapping_t motor, uint32_t duty_cycle, direction_t direct
 
     /* Set pulse width on the PWM channel */
     rc = pwm_set_pulse_dt(&m->pwm, pulse_ticks);
+    if (rc == 0 && motor == LEFT_MOTOR) rc = test_points_pwm_written();
     if (rc != 0) {
         return -1;
     }
@@ -169,6 +173,7 @@ int motor_debug_pins(motor_mapping_t motor, int in1, int in2, uint32_t duty)
     rc = gpio_pin_set_dt(&m->in2, in2);
     printk("m%d in2=%d rc=%d\n", motor, in2, rc);
     rc = pwm_set_pulse_dt(&m->pwm, (duty * m->pwm.period) / MAX_DUTY_CYCLE);
+    if (rc == 0 && motor == LEFT_MOTOR) rc = test_points_pwm_written();
     printk("m%d pwm rc=%d\n", motor, rc);
     return rc;
 }

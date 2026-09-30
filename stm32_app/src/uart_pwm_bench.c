@@ -10,6 +10,7 @@
 #include "blinkers.h"
 #include "encoder.h"
 #include "system_state.h"
+#include "test_points.h"
 
 static K_MUTEX_DEFINE(output_lock);
 static struct system_state state;
@@ -157,6 +158,10 @@ static int status_cmd(const struct shell *sh, size_t argc, char **argv)
     uint32_t pulse = servo_get_last_pulse_us();
     unsigned lights = blinkers_get_mode(), crossed = blinkers_turn_crossed();
     k_mutex_unlock(&output_lock);
+    struct test_point_counts marks = test_points_counts();
+    shell_print(sh, "Test points: CMD_RX=%u PWM_SET=%u errors=%u PC10=%u PC11=%u",
+                marks.command_rx, marks.pwm_set, marks.errors,
+                !!(GPIOC->ODR & BIT(10)), !!(GPIOC->ODR & BIT(11)));
     /* Console logging must not block command handling while holding output_lock. */
     shell_print(sh, "Actuator bench: duty=%u brake=%u fault=%u accepted=%u received=%u rejected=%u",
                 current_duty, current_brake, system_state_reason(&snapshot) != SYS_OK, count,
