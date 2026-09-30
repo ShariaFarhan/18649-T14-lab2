@@ -17,7 +17,7 @@ typedef enum {
     FREE = 0,    /* Coast / High Impedance (00) */
     FORWARD,     /* Direction 1 */
     BACKWARD,    /* Direction 2 */
-    STOP         /* Dynamic Braking (11) */
+    STOP         /* Dynamic brake: IN=11, EN high; duty ignored */
 } direction_t;
 
 struct motor_attr {
@@ -35,11 +35,14 @@ int motor_init(void);
  * @brief Set speed and direction for a specific motor channel.
  * 
  * @param motor LEFT_MOTOR or RIGHT_MOTOR
- * @param duty_cycle Speed percentage (0 - 100)
+ * @param duty_cycle Speed percentage (0 - 100); ignored for STOP
  * @param direction FREE, FORWARD, BACKWARD, or STOP
- * @return 0 on success, -1 on error
+ * @return 0 on success, negative on error
  */
 int sys_motor_set(motor_mapping_t motor, uint32_t duty_cycle, direction_t direction);
+
+/* Brake only the selected motor; no duty argument. Requires motor_init(). */
+int motor_brake(motor_mapping_t motor);
 
 int motor_debug_pins(motor_mapping_t motor, int in1, int in2, uint32_t duty);
 

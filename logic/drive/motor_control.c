@@ -47,7 +47,7 @@ int motor_init(void)
         if (!pwm_is_ready_dt(&motors[i].pwm) ||
             !gpio_is_ready_dt(&motors[i].in1) ||
             !gpio_is_ready_dt(&motors[i].in2)) {
-            printk("Error: Motor hardware channel %u not ready\n", i);
+            printk("Error: Motor hardware channel %zu not ready\n", i);
             return -ENODEV;
         }
 
@@ -65,8 +65,40 @@ int motor_init(void)
     return 0;
 }
 
+/* Dynamic braking of one L298N bridge. Requires motor_init() first. */
+int motor_brake(motor_mapping_t motor)
+{
+    if ((unsigned int)motor >= NUM_MOTORS) {
+        return -EINVAL;
+    }
+
+    const struct motor_attr *m = &motors[motor];
+    /* Disable the bridge while setting its two direction inputs. */
+    int rc = pwm_set_pulse_dt(&m->pwm, 0U);
+    if (rc != 0) goto fail;
+    rc = gpio_pin_set_dt(&m->in1, 1);
+    if (rc != 0) goto fail;
+    rc = gpio_pin_set_dt(&m->in2, 1);
+    if (rc != 0) goto fail;
+
+    /* Pulse == period means EN stays HIGH, not a forward-drive command. */
+    rc = pwm_set_pulse_dt(&m->pwm, m->pwm.period);
+    if (rc == 0) return 0;
+
+fail:
+    /* Best effort: disable a bridge whose control update failed.
+     * Return the error; physical braking is not guaranteed on failure. */
+    (void)pwm_set_pulse_dt(&m->pwm, 0U);
+    return rc;
+}
+
 int sys_motor_set(motor_mapping_t motor, uint32_t duty_cycle, direction_t direction)
 {
+    /* STOP ignores duty_cycle and returns before normal PWM handling. */
+    if (direction == STOP) {
+        return motor_brake(motor);
+    }
+
     if (motor >= NUM_MOTORS) return -1;
     if (duty_cycle > MAX_DUTY_CYCLE) return -1;
 
@@ -101,11 +133,6 @@ int sys_motor_set(motor_mapping_t motor, uint32_t duty_cycle, direction_t direct
         //     gpio_pin_set_dt(&m->in1, 0); //[cite: 6]
         //     gpio_pin_set_dt(&m->in2, 1); //[cite: 6]
         // }
-    }
-    else if (direction == STOP) {
-        /* 11 - Set both direction pins HIGH (Dynamic Brake)[cite: 6] */
-        gpio_pin_set_dt(&m->in1, 1); // Replaces gpio_set[cite: 6]
-        gpio_pin_set_dt(&m->in2, 1); // Replaces gpio_set[cite: 6]
     }
     else {
         return -1;

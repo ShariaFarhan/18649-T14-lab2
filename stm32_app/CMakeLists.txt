@@ -8,6 +8,7 @@ target_sources(app PRIVATE
     ../logic/steering/servo.c
     ../logic/blinkers/blinkers.c
     ../logic/drive/motor_control.c
+    ../logic/drive/brake.c
 )
 
 target_include_directories(app PRIVATE

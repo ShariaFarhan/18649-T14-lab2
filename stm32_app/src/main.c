@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
@@ -8,6 +9,7 @@
 #include "blinkers.h"
 #include "servo.h"
 #include "motor_control.h"
+#include "brake.h"
 
 //
 //	SERVO
@@ -309,7 +311,7 @@ static int cmd_motor_set(const struct shell *sh, size_t argc, char **argv)
     /* Execute Driver Call */
     int rc = sys_motor_set(motor, duty_cycle, dir);
     if (rc == 0) {
-        shell_print(sh, "Motor %s set to %s at %u%% duty cycle.", argv[1], argv[2], duty_cycle);
+        shell_print(sh, "Motor %s set to %s; duty=%u%% (ignored for stop).", argv[1], argv[2], duty_cycle);
     } else {
         shell_error(sh, "Failed to set motor parameters (code %d).", rc);
     }
@@ -317,7 +319,21 @@ static int cmd_motor_set(const struct shell *sh, size_t argc, char **argv)
     return rc;
 }
 
+static int cmd_motor_brake(const struct shell *sh, size_t argc, char **argv)
+{
+    ARG_UNUSED(argc);
+    ARG_UNUSED(argv);
+    int rc = motor_brake_all();
+    if (rc != 0) {
+        shell_error(sh, "Braking failed on at least one motor: %d", rc);
+    } else {
+        shell_print(sh, "Both motors: dynamic braking");
+    }
+    return rc;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor,
+    SHELL_CMD(brake, NULL, "Dynamically brake both motors", cmd_motor_brake),
     SHELL_CMD(init, NULL, "Initialize motor driver pins & PWM", cmd_motor_init),
     SHELL_CMD(set, NULL, "Set motor: motor set <left|right> <forward|backward|free|stop> <duty_cycle>", cmd_motor_set),
     SHELL_SUBCMD_SET_END
