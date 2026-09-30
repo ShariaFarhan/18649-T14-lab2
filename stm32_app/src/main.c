@@ -10,6 +10,7 @@
 #include "servo.h"
 #include "motor_control.h"
 #include "brake.h"
+#include "encoder.h"
 
 //
 //	SERVO
@@ -349,6 +350,8 @@ int main(void)
 {
 	int blinker_rc = blinkers_init();
 	int motor_rc = motor_init();
+	int encoder_rc = encoders_init();
+	printk("Encoder init: %d; use encoder status / zero / sign\n", encoder_rc);
 
 	printk("Motor test shell ready. Type 'motor' for commands.\n");
 	if (motor_rc != 0) {

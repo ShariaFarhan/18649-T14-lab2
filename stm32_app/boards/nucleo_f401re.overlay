@@ -86,3 +86,51 @@
 		pinctrl-names = "default";
 	};
 };
+/* Lab2 wheel encoders: 90 * 11 * x4 = 3960 counts per wheel revolution.
+ * Keep Sidrisha's motor TIM3 and Ryan's servo TIM1 assignments unchanged. */
+/ {
+ aliases {
+  encoder-left = &encoder_left;
+  encoder-right = &encoder_right;
+ };
+ pwmleds { status = "disabled"; };
+};
+
+/* Default board drivers otherwise claim encoder and motor pins. */
+&pwm2 { status = "disabled"; };
+&spi1 { status = "disabled"; };
+&spi2 { status = "disabled"; };
+&adc1 { status = "disabled"; }; /* PA0 released; future current ADC uses PC2/3/4 */
+
+/* Preserve USART2 debug; reserve the Pi link on PA9/PA10, not PB6/PB7. */
+&usart1 {
+ pinctrl-0 = <&usart1_tx_pa9 &usart1_rx_pa10>;
+ pinctrl-names = "default";
+ current-speed = <115200>;
+ status = "okay";
+};
+
+&timers2 {
+ status = "okay";
+ st,prescaler = <0>;
+ encoder_left: qdec {
+  status = "okay";
+  pinctrl-0 = <&tim2_ch1_pa0 &tim2_ch2_pa1>;
+  pinctrl-names = "default";
+  st,encoder-mode = <3>; /* Both A/B edges: x4. */
+  st,counts-per-revolution = <3960>;
+  st,input-filter-level = <3>;
+ };
+};
+&timers4 {
+ status = "okay";
+ st,prescaler = <0>;
+ encoder_right: qdec {
+  status = "okay";
+  pinctrl-0 = <&tim4_ch1_pb6 &tim4_ch2_pb7>;
+  pinctrl-names = "default";
+  st,encoder-mode = <3>;
+  st,counts-per-revolution = <3960>;
+  st,input-filter-level = <3>;
+ };
+};

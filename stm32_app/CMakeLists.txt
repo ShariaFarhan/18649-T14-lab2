@@ -5,10 +5,13 @@ project(lab2)
 
 target_sources(app PRIVATE
     src/main.c
+    src/encoder_shell.c
     ../logic/steering/servo.c
     ../logic/blinkers/blinkers.c
     ../logic/drive/motor_control.c
     ../logic/drive/brake.c
+    ../logic/drive/encoder.c
+    ../logic/drive/encoder_math.c
 )
 
 target_include_directories(app PRIVATE
