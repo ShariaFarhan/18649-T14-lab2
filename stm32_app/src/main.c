@@ -11,6 +11,7 @@
 #include "motor_control.h"
 #include "brake.h"
 #include "encoder.h"
+#include "speed_control.h"
 
 //
 //	SERVO
@@ -260,7 +261,7 @@ SHELL_CMD_REGISTER(blinker, &blinker_commands, "Blinker test commands", NULL);
 //
 static int cmd_motor_init(const struct shell *sh, size_t argc, char **argv)
 {
-    int rc = motor_init();
+    int rc = speed_control_manual_init();
     if (rc == 0) {
         shell_print(sh, "Motor driver initialized successfully.");
     } else {
@@ -310,7 +311,7 @@ static int cmd_motor_set(const struct shell *sh, size_t argc, char **argv)
     }
 
     /* Execute Driver Call */
-    int rc = sys_motor_set(motor, duty_cycle, dir);
+    int rc = speed_control_manual_set(motor, duty_cycle, dir);
     if (rc == 0) {
         shell_print(sh, "Motor %s set to %s; duty=%u%% (ignored for stop).", argv[1], argv[2], duty_cycle);
     } else {
@@ -324,7 +325,7 @@ static int cmd_motor_brake(const struct shell *sh, size_t argc, char **argv)
 {
     ARG_UNUSED(argc);
     ARG_UNUSED(argv);
-    int rc = motor_brake_all();
+    int rc = speed_control_set_brake(true);
     if (rc != 0) {
         shell_error(sh, "Braking failed on at least one motor: %d", rc);
     } else {
@@ -349,10 +350,11 @@ SHELL_CMD_REGISTER(motor, &sub_motor, "Motor driver control commands", NULL);
 int main(void)
 {
 	int blinker_rc = blinkers_init();
-	int motor_rc = motor_init();
 	int encoder_rc = encoders_init();
+	int motor_rc = speed_control_init();
 	printk("Encoder init: %d; use encoder status / zero / sign\n", encoder_rc);
 
+	printk("Closed-loop drive is disarmed. Use drive arm, then drive throttle.\n");
 	printk("Motor test shell ready. Type 'motor' for commands.\n");
 	if (motor_rc != 0) {
 			printk("Motor initialization failed: %d\n", motor_rc);

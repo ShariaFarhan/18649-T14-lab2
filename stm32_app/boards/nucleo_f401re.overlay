@@ -134,3 +134,6 @@
   st,input-filter-level = <3>;
  };
 };
+
+/* PWM update scope marker for the closed-loop motor path. */
+/ { zephyr,user { pwm-set-test-gpios = <&gpioc 11 GPIO_ACTIVE_HIGH>; }; };

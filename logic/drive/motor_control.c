@@ -100,21 +100,30 @@ int sys_motor_set(motor_mapping_t motor, uint32_t duty_cycle, direction_t direct
         return motor_brake(motor);
     }
 
-    if (motor >= NUM_MOTORS) return -1;
+    if ((unsigned int)motor >= NUM_MOTORS) return -EINVAL;
     if (duty_cycle > MAX_DUTY_CYCLE) return -1;
 
     const struct motor_attr *m = &motors[motor];
     uint32_t pulse_ticks = (duty_cycle * m->pwm.period) / MAX_DUTY_CYCLE;
 
+    if (direction < FREE || direction > STOP) return -EINVAL;
+    /* Closed-loop updates must not change direction with EN active. */
+    int rc = pwm_set_pulse_dt(&m->pwm, 0U);
+    if (rc != 0) return rc;
     if (direction == FREE) {
         /* 00 - Set both direction pins to LOW (Coast) */
-        gpio_pin_set_dt(&m->in1, 0); // Replaces gpio_clr
-        gpio_pin_set_dt(&m->in2, 0); // Replaces gpio_clr
+        pulse_ticks = 0U; /* FREE must always leave EN low. */
+        rc = gpio_pin_set_dt(&m->in1, 0); // Replaces gpio_clr
+        if (rc != 0) return rc;
+        rc = gpio_pin_set_dt(&m->in2, 0); // Replaces gpio_clr
+        if (rc != 0) return rc;
     }
     else if (direction == FORWARD) {
         /* Forward state (with left/right motor inversion logic preserved from your file)[cite: 6] */
-        gpio_pin_set_dt(&m->in1, 1); //[cite: 6]
-        gpio_pin_set_dt(&m->in2, 0);
+        rc = gpio_pin_set_dt(&m->in1, 1); //[cite: 6]
+        if (rc != 0) return rc;
+        rc = gpio_pin_set_dt(&m->in2, 0);
+        if (rc != 0) return rc;
         // if (motor == LEFT_MOTOR) {
         //     gpio_pin_set_dt(&m->in1, 0); //[cite: 6]
         //     gpio_pin_set_dt(&m->in2, 1); //[cite: 6]
@@ -125,8 +134,10 @@ int sys_motor_set(motor_mapping_t motor, uint32_t duty_cycle, direction_t direct
     }
     else if (direction == BACKWARD) {
         /* Backward state[cite: 6] */
-        gpio_pin_set_dt(&m->in1, 0); //[cite: 6]
-        gpio_pin_set_dt(&m->in2, 1); //[cite: 6]
+        rc = gpio_pin_set_dt(&m->in1, 0); //[cite: 6]
+        if (rc != 0) return rc;
+        rc = gpio_pin_set_dt(&m->in2, 1); //[cite: 6]
+        if (rc != 0) return rc;
         // if (motor == LEFT_MOTOR) {
         //     gpio_pin_set_dt(&m->in1, 1); //[cite: 6]
         //     gpio_pin_set_dt(&m->in2, 0); //[cite: 6]
@@ -140,7 +151,7 @@ int sys_motor_set(motor_mapping_t motor, uint32_t duty_cycle, direction_t direct
     }
 
     /* Set pulse width on the PWM channel */
-    int rc = pwm_set_pulse_dt(&m->pwm, pulse_ticks);
+    rc = pwm_set_pulse_dt(&m->pwm, pulse_ticks);
     if (rc != 0) {
         return -1;
     }
