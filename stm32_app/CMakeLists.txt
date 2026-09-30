@@ -1,12 +1,18 @@
 cmake_minimum_required(VERSION 3.28.0)
 
 option(LAB2_WHEEL_STEERING "Real wheel to steering, motors disabled" OFF)
+option(LAB2_WHEEL_RIGHT_DRIVE "Add right-wheel encoder speed control to wheel steering" OFF)
 option(LAB2_ENCODER_ONLY "Standalone encoder readout without Pi or actuator PWM" OFF)
 if(LAB2_ENCODER_ONLY)
     list(APPEND EXTRA_DTC_OVERLAY_FILE "${CMAKE_CURRENT_SOURCE_DIR}/boards/encoder_only.overlay")
 endif()
 if(LAB2_WHEEL_STEERING)
-    list(APPEND EXTRA_DTC_OVERLAY_FILE "${CMAKE_CURRENT_SOURCE_DIR}/boards/wheel_steering.overlay")
+    if(NOT LAB2_WHEEL_RIGHT_DRIVE)
+        list(APPEND EXTRA_DTC_OVERLAY_FILE "${CMAKE_CURRENT_SOURCE_DIR}/boards/wheel_steering.overlay")
+    endif()
+endif()
+if(LAB2_WHEEL_RIGHT_DRIVE AND NOT LAB2_WHEEL_STEERING)
+    message(FATAL_ERROR "Right drive requires LAB2_WHEEL_STEERING")
 endif()
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(lab2)
@@ -24,10 +30,18 @@ endif()
 if(LAB2_WHEEL_STEERING)
     target_sources(app PRIVATE src/wheel_steering_main.c
         ../logic/steering/servo.c ../logic/steering/wheel_mapping.c
+        ../logic/steering/wheel_buttons.c ../logic/blinkers/blinkers.c
         ../logic/comms/pi_link.c ../logic/comms/link_parser.c)
-    target_include_directories(app PRIVATE ../logic/steering ../logic/comms)
+    target_include_directories(app PRIVATE ../logic/steering ../logic/comms ../logic/blinkers)
     target_compile_definitions(app PRIVATE LAB2_RAW_WHEEL_LINK=1 LINK_TIMEOUT_MS=60
         SERVO_PULSE_LEFT_US=1000U SERVO_PULSE_RIGHT_US=2000U)
+    if(LAB2_WHEEL_RIGHT_DRIVE)
+        target_sources(app PRIVATE ../logic/drive/right_drive.c ../logic/drive/right_speed_model.c
+            ../logic/drive/motor_control.c ../logic/drive/encoder.c ../logic/drive/encoder_math.c
+            src/encoder_shell.c)
+        target_include_directories(app PRIVATE ../logic/drive)
+        target_compile_definitions(app PRIVATE LAB2_WHEEL_RIGHT_DRIVE=1 MOTOR_TIMING_WHEEL=RIGHT_MOTOR)
+    endif()
 elseif(LAB2_ENCODER_ONLY)
     target_sources(app PRIVATE src/encoder_only_main.c src/encoder_shell.c
         ../logic/drive/encoder.c ../logic/drive/encoder_math.c)

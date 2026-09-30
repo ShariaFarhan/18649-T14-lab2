@@ -23,8 +23,9 @@ int main(void) {
     for (int motor=0; motor<2; ++motor) {
         for (uint32_t duty=0; duty<=100; ++duty) {
             reset(); pulses[motor]=12500;
+            pins[2*motor]=pins[2*motor+1]=1;
             assert(sys_motor_set(motor,duty,STOP)==0);
-            assert(pins[2*motor]==1 && pins[2*motor+1]==1);
+            assert(pins[2*motor]==0 && pins[2*motor+1]==0);
             assert(pulses[motor]==50000 && pulses[1-motor]==0);
             assert(marks==(motor==LEFT_MOTOR ? 1U : 0U));
             assert(calls==4); /* No later normal-PWM write overwrites EN. */

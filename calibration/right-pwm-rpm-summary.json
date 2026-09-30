@@ -1,0 +1,72 @@
+[
+  {
+    "pwm_percent": 10,
+    "mean_rpm": 40.174,
+    "min_rpm": 37.19,
+    "max_rpm": 45.454,
+    "samples": 18
+  },
+  {
+    "pwm_percent": 20,
+    "mean_rpm": 63.36,
+    "min_rpm": 57.851,
+    "max_rpm": 66.115,
+    "samples": 18
+  },
+  {
+    "pwm_percent": 30,
+    "mean_rpm": 96.418,
+    "min_rpm": 90.909,
+    "max_rpm": 99.173,
+    "samples": 18
+  },
+  {
+    "pwm_percent": 40,
+    "mean_rpm": 139.118,
+    "min_rpm": 136.363,
+    "max_rpm": 140.495,
+    "samples": 18
+  },
+  {
+    "pwm_percent": 50,
+    "mean_rpm": 183.195,
+    "min_rpm": 181.818,
+    "max_rpm": 185.95,
+    "samples": 18
+  },
+  {
+    "pwm_percent": 60,
+    "mean_rpm": 226.583,
+    "min_rpm": 223.14,
+    "max_rpm": 231.404,
+    "samples": 18
+  },
+  {
+    "pwm_percent": 70,
+    "mean_rpm": 264.692,
+    "min_rpm": 260.33,
+    "max_rpm": 268.595,
+    "samples": 18
+  },
+  {
+    "pwm_percent": 80,
+    "mean_rpm": 295.224,
+    "min_rpm": 293.388,
+    "max_rpm": 297.52,
+    "samples": 18
+  },
+  {
+    "pwm_percent": 90,
+    "mean_rpm": 314.508,
+    "min_rpm": 314.049,
+    "max_rpm": 318.181,
+    "samples": 18
+  },
+  {
+    "pwm_percent": 100,
+    "mean_rpm": 320.018,
+    "min_rpm": 318.181,
+    "max_rpm": 322.314,
+    "samples": 18
+  }
+]

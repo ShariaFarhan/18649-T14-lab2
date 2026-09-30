@@ -70,14 +70,14 @@ If the team already has a **3.3 V USB-to-TTL adapter**, it can instead connect a
 | 5 | CMD_RX | STM32 PC10 / CN7-1 |
 | 6 | PWM_SET | STM32 PC11 / CN7-2 |
 | 7 | PWM_OUT | Tap left motor PWM, PA7 / CN10-15 |
-| 8 | DIR_A | Tap left motor IN2, PB15 / CN10-26 |
+| 8 | DIR_A | Tap left motor IN1, PB14 / CN10-28 |
 | 9 | SRV | Tap PA8 / CN10-23 |
 | 10 | FL | Tap PC6 / CN10-4 |
 | 11 | FR | Tap PC7 / CN10-19 |
 | 12 | RL | Tap PC8 / CN10-2 |
 | 13 | RR | Tap PC9 / CN10-1 |
 
-One signal per connected breadboard row, in the handout's order. The four software markers are implemented in the running Python/STM32 bench path. PWM_OUT taps the left motor (PA7), and PWM_SET marks its final requested duty write. DIR_A taps PB15: it changes from LOW in forward drive to HIGH in dynamic braking; PB14 stays HIGH and cannot time that transition. For reverse-to-brake tests, PB14 is the changing input instead.
+One signal per connected breadboard row, in the handout's order. The four software markers are implemented in the running Python/STM32 bench path. PWM_OUT taps the left motor (PA7), and PWM_SET marks its final requested duty write. With LOW/LOW dynamic braking and EN HIGH, DIR_A taps PB14: it changes from HIGH in forward drive to LOW in braking; PB15 stays LOW. For reverse-to-brake tests, PB15 is the changing input instead.
 
 ## Devicetree changes required
 

@@ -17,7 +17,7 @@ typedef enum {
     FREE = 0,    /* Coast / High Impedance (00) */
     FORWARD,     /* Direction 1 */
     BACKWARD,    /* Direction 2 */
-    STOP         /* Dynamic Braking (11) */
+    STOP         /* Dynamic Braking (00 with EN HIGH) */
                  /* EN stays high; duty_cycle is ignored for STOP. */
 } direction_t;
 

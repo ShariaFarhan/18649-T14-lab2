@@ -15,6 +15,9 @@
 #define MOTOR_LEFT_IN2   DT_ALIAS(motor_left_in2)
 #define MOTOR_RIGHT_IN1  DT_ALIAS(motor_right_in1)
 #define MOTOR_RIGHT_IN2  DT_ALIAS(motor_right_in2)
+#ifndef MOTOR_TIMING_WHEEL
+#define MOTOR_TIMING_WHEEL LEFT_MOTOR
+#endif
 
 #if !DT_NODE_HAS_STATUS(MOTOR_LEFT_PWM, okay) || \
     !DT_NODE_HAS_STATUS(MOTOR_RIGHT_PWM, okay) || \
@@ -78,15 +81,15 @@ int motor_brake(motor_mapping_t motor)
     /* Disable the bridge while setting its two direction inputs. */
     int rc = pwm_set_pulse_dt(&m->pwm, 0U);
     if (rc != 0) goto fail;
-    /* 11 - Set both direction pins HIGH (Dynamic Brake)[cite: 6] */
-    rc = gpio_pin_set_dt(&m->in1, 1); // Replaces gpio_set[cite: 6]
+    /* 00 with EN HIGH - Set both direction pins LOW (Dynamic Brake). */
+    rc = gpio_pin_set_dt(&m->in1, 0);
     if (rc != 0) goto fail;
-    rc = gpio_pin_set_dt(&m->in2, 1); // Replaces gpio_set[cite: 6]
+    rc = gpio_pin_set_dt(&m->in2, 0);
     if (rc != 0) goto fail;
 
     /* Pulse == period means EN stays HIGH, not a forward-drive command. */
     rc = pwm_set_pulse_dt(&m->pwm, m->pwm.period);
-    if (rc == 0 && motor == LEFT_MOTOR) rc = test_points_pwm_written();
+    if (rc == 0 && motor == MOTOR_TIMING_WHEEL) rc = test_points_pwm_written();
     if (rc == 0) return 0;
 
 fail:
@@ -155,7 +158,7 @@ int sys_motor_set(motor_mapping_t motor, uint32_t duty_cycle, direction_t direct
 
     /* Set pulse width on the PWM channel */
     rc = pwm_set_pulse_dt(&m->pwm, pulse_ticks);
-    if (rc == 0 && motor == LEFT_MOTOR) rc = test_points_pwm_written();
+    if (rc == 0 && motor == MOTOR_TIMING_WHEEL) rc = test_points_pwm_written();
     if (rc != 0) {
         return -1;
     }
@@ -173,7 +176,7 @@ int motor_debug_pins(motor_mapping_t motor, int in1, int in2, uint32_t duty)
     rc = gpio_pin_set_dt(&m->in2, in2);
     printk("m%d in2=%d rc=%d\n", motor, in2, rc);
     rc = pwm_set_pulse_dt(&m->pwm, (duty * m->pwm.period) / MAX_DUTY_CYCLE);
-    if (rc == 0 && motor == LEFT_MOTOR) rc = test_points_pwm_written();
+    if (rc == 0 && motor == MOTOR_TIMING_WHEEL) rc = test_points_pwm_written();
     printk("m%d pwm rc=%d\n", motor, rc);
     return rc;
 }

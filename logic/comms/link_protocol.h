@@ -49,11 +49,18 @@ typedef struct {
                                  * are wired; currently always 0 (unread). */
     uint16_t current_motor_r;
     uint16_t current_servo;
+#ifdef LAB2_WHEEL_RIGHT_DRIVE
+    int32_t right_target_mrpm;
+    int32_t right_actual_mrpm;
+    uint16_t right_duty_percent;
+    uint8_t right_flags; /* armed, braking, fault, startup assist */
+#endif
 } hb_payload_t;
 
 #pragma pack(pop)
 
 #define FLAG_UDP_STALE  0x01
+#define FLAG_RIGHT_ENABLE 0x02 /* Only the separate right-drive test profile accepts this. */
 
 
 enum pi_link_zone_state {

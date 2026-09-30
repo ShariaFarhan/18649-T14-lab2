@@ -29,7 +29,7 @@ Black probe to GND. The readings below are approximate DC averages; a voltmeter 
 |---|---|---|
 | Left motor PWM | PA7, CN10-15 | 50% throttle / no brake: about 1.65 V |
 | Right motor PWM | PA6, CN10-13 | Same as left |
-| Motor brake | PA6/PA7, PB12–PB15 | All about 3.3 V |
+| Motor brake | PA6/PA7, PB12–PB15 | PA6/PA7 about 3.3 V; PB12–PB15 about 0 V |
 | Motor coast | Same six pins | All about 0 V |
 | Steering | PA8, CN10-23 | Left 50% about 0.21 V; center 0.25 V; right 50% 0.29 V |
 | Front left | PC6, CN10-4 | Alternates 0 / 3.3 V with rear left |
@@ -119,14 +119,14 @@ Bring out these 13 rows in order, one signal per connected breadboard row:
 | 5 | CMD_RX | STM32 PC10, CN7-1 | Toggle after complete frame CRC/length/sequence acceptance, before command handling |
 | 6 | PWM_SET | STM32 PC11, CN7-2 | Toggle immediately after a successful final LEFT motor timer write |
 | 7 | PWM_OUT | PA7, CN10-15 | Actual left motor PWM |
-| 8 | DIR_A | PB15, CN10-26 | Actual left IN2: LOW forward, HIGH brake |
+| 8 | DIR_A | PB14, CN10-28 | Actual left IN1: HIGH forward, LOW brake |
 | 9 | SRV | PA8, CN10-23 | Actual steering PWM |
 | 10 | FL | PC6, CN10-4 | Actual front-left output |
 | 11 | FR | PC7, CN10-19 | Actual front-right output |
 | 12 | RL | PC8, CN10-2 | Actual rear-left output |
 | 13 | RR | PC9, CN10-1 | Actual rear-right output |
 
-The seven actuator signals are physical taps, not extra software GPIOs. After correcting the physical motor sides, DIR_A uses left IN2 (PB15). Left IN1 (PB14) has no edge when forward drive changes to the current brake mode.
+The seven actuator signals are physical taps, not extra software GPIOs. With the current LOW/LOW brake, DIR_A uses left IN1 (PB14). It falls from HIGH to LOW on forward-to-brake; IN2 (PB15) stays LOW. For reverse-to-brake, use PB15 instead.
 
 For throttle: scope CMD_RX against PWM_SET, then PWM_SET against PWM_OUT. For brake: scope CMD_RX against DIR_A. For steering/lights: scope CMD_RX against SRV or the selected lamp output. Repeat measurements under load; code/edge counts alone do not establish the timing deadline.
 
@@ -138,4 +138,4 @@ Both markers start LOW. Pi requests GPIO23/24 exclusively and reads back levels;
 
 Verification of the scope-marker update (2026-09-30): both the integrated bench and default PI/manual firmware profiles compiled. Motor/brake hook-order tests and speed-controller regression tests passed. Pi GPIO23/24 were claimed on the RP1 chip, toggled, and read back at both levels; running readback matched counter parity. STM32 CMD_RX/PWM_SET counts advanced with zero marker errors. Live self-test, invalid-input and recovery checks passed after instrumentation. This verifies instrumentation behavior, not oscilloscope timing acceptance.
 
-Motor-side correction (2026-09-30): physical left is PA7/PB14/PB15 (bridge B); physical right is PA6/PB12/PB13 (bridge A). Forward/backward electrical polarity, encoder wiring, encoder signs and 1320 CPR are unchanged. PWM_OUT now taps PA7 and DIR_A PB15 to remain aligned with the LEFT PWM_SET marker.
+Motor-side correction (2026-09-30): physical left is PA7/PB14/PB15 (bridge B); physical right is PA6/PB12/PB13 (bridge A). Forward/backward electrical polarity, encoder wiring, encoder signs and 1320 CPR are unchanged. PWM_OUT taps PA7. After the LOW/LOW brake change, DIR_A taps PB14 for forward-to-brake timing.
