@@ -1,5 +1,6 @@
 #include <zephyr/dt-bindings/pwm/pwm.h>
 #include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/adc/adc.h>
 
 / {
 	aliases {
@@ -56,6 +57,12 @@
 		motor_r_in2: motor_r_in2 { gpios = <&gpiob 13 GPIO_ACTIVE_HIGH>; };
 	};
 
+	zephyr,user {
+		/* ACS712 divider outputs: right motor on PC3, servo on PC4. */
+		io-channels = <&adc1 13>, <&adc1 14>;
+		io-channel-names = "right-motor-current", "servo-current";
+	};
+
 };
 
 /* PA8 is the board's default I2C3 SCL pin, so release it for TIM1_CH1. */
@@ -100,7 +107,6 @@
 &pwm2 { status = "disabled"; };
 &spi1 { status = "disabled"; };
 &spi2 { status = "disabled"; };
-&adc1 { status = "disabled"; }; /* PA0 released; future current ADC uses PC2/3/4 */
 
 /* Preserve USART2 debug; reserve the Pi link on PA9/PA10, not PB6/PB7. */
 &usart1 {
@@ -142,4 +148,29 @@
 / {
  chosen { pilink,uart = &usart1; };
  zephyr,user { cmd-rx-test-gpios = <&gpioc 10 GPIO_ACTIVE_HIGH>; };
+};
+
+/* ADC1: ACS712 divider outputs on PC3/ADC1_IN13 and PC4/ADC1_IN14. */
+&adc1 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	pinctrl-0 = <&adc1_in13_pc3 &adc1_in14_pc4>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	channel@d {
+		reg = <13>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_MAX>;
+		zephyr,resolution = <12>;
+	};
+
+	channel@e {
+		reg = <14>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_MAX>;
+		zephyr,resolution = <12>;
+	};
 };

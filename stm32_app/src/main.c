@@ -7,6 +7,7 @@
 #include <zephyr/shell/shell.h>
 
 #include "blinkers.h"
+#include "current_sense.h"
 #include "servo.h"
 #include "motor_control.h"
 #include "brake.h"
@@ -357,6 +358,92 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor,
 SHELL_CMD_REGISTER(motor, &sub_motor, "Motor driver control commands", NULL);
 
 //
+// CURRENT SENSORS
+//
+
+static int print_current_readings(const struct shell *sh)
+{
+	for (int i = 0; i < CURRENT_SENSE_CHANNEL_COUNT; ++i) {
+		struct current_sense_sample sample;
+		int rc = current_sense_read((enum current_sense_channel)i, &sample);
+
+		if (rc != 0) {
+			shell_error(sh, "%s ADC read failed: %d",
+				    current_sense_channel_name(i), rc);
+			return rc;
+		}
+
+		if (sample.zero_valid) {
+			shell_print(sh,
+				    "%s: raw=%u adc=%d mV delta=%+d mV current=%+d mA",
+				    current_sense_channel_name(i), sample.raw,
+				    sample.adc_mv, sample.delta_mv,
+				    sample.current_ma);
+		} else {
+			shell_print(sh,
+				    "%s: raw=%u adc=%d mV (run 'current zero' unloaded)",
+				    current_sense_channel_name(i), sample.raw,
+				    sample.adc_mv);
+		}
+	}
+
+	return 0;
+}
+
+static int cmd_current_init(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	int rc = current_sense_init();
+
+	if (rc != 0) {
+		shell_error(sh, "Current sensor ADC initialization failed: %d", rc);
+		return rc;
+	}
+
+	shell_print(sh, "Current sensor ADC initialized (PC3 right, PC4 servo)");
+	return 0;
+}
+
+static int cmd_current_read(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	return print_current_readings(sh);
+}
+
+static int cmd_current_zero(const struct shell *sh, size_t argc, char **argv)
+{
+	int rc;
+
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	rc = current_sense_zero_all();
+	if (rc != 0) {
+		shell_error(sh, "Current sensor zero calibration failed: %d", rc);
+		return rc;
+	}
+
+	shell_print(sh, "Captured unloaded zero for both current sensors");
+	return print_current_readings(sh);
+}
+
+SHELL_STATIC_SUBCMD_SET_CREATE(
+	current_commands,
+	SHELL_CMD(init, NULL, "Initialize PC3 and PC4 ADC channels", cmd_current_init),
+	SHELL_CMD(read, NULL, "Read averaged ADC voltage and signed current",
+		  cmd_current_read),
+	SHELL_CMD(zero, NULL, "Capture unloaded readings as zero current",
+		  cmd_current_zero),
+	SHELL_SUBCMD_SET_END);
+
+SHELL_CMD_REGISTER(current, &current_commands, "ACS712 current sensor commands",
+		   NULL);
+
+//
 //	MAIN
 //
 
@@ -365,6 +452,7 @@ int main(void)
 	int blinker_rc = blinkers_init();
 	int encoder_rc = encoders_init();
 	int motor_rc = speed_control_init();
+	int current_rc = current_sense_init();
 	printk("Encoder init: %d; use encoder status / zero / sign\n", encoder_rc);
 #ifdef LAB2_UART_DIAGNOSTIC
 	pi_link_init();
@@ -384,6 +472,12 @@ int main(void)
 		printk("Blinker test shell ready. Type 'blinker' for commands.\n");
 	} else {
 		printk("Blinker initialization failed: %d\n", blinker_rc);
+	}
+	if (current_rc == 0) {
+		printk("Current sensors ready: PC3 right motor, PC4 servo. Type 'current'.\n");
+		printk("Run 'current zero' only with both loads off or disconnected.\n");
+	} else {
+		printk("Current sensor initialization failed: %d\n", current_rc);
 	}
 	return 0;
 }

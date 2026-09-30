@@ -42,6 +42,7 @@ struct pwm_dt_spec { int channel; uint32_t period; };
 struct shell { int unused; };
 #define shell_error(sh, ...) ((void)(sh), (void)snprintf(NULL, 0, __VA_ARGS__))
 #define shell_print(sh, ...) ((void)(sh), (void)snprintf(NULL, 0, __VA_ARGS__))
+#define speed_control_manual_set sys_motor_set
 
 static int pins[4], calls, fail_at, pwm_unready, gpio_unready;
 static bool pwm_always_fails;
@@ -87,6 +88,8 @@ static void reset(void) {
     pwm_unready = gpio_unready = -1;
     pwm_always_fails = false;
 }
+static int test_points_init(void) { return 0; }
+static int test_points_pwm_written(void) { return 0; }
 """
 
 TESTS = r"""
@@ -199,12 +202,16 @@ int main(void) {
 def main():
     source = (ROOT / "stm32_app/src/main.c").read_text()
     start = source.index("static int cmd_motor_set(")
-    end = source.index("SHELL_STATIC_SUBCMD_SET_CREATE(sub_motor,", start)
+    end = source.index("static int cmd_motor_brake(", start)
     # Extract the actual handler, not a test-side rewrite of the parser.
     handler = source[start:end]
     with tempfile.TemporaryDirectory(prefix="lab2-motor-tests-") as tmp:
         temp = Path(tmp)
         (temp / "stub.h").write_text(STUB)
+        (temp / "test_points.h").write_text(
+            "int test_points_init(void);\n"
+            "int test_points_pwm_written(void);\n"
+        )
         for name in ("device.h", "devicetree.h", "drivers/gpio.h",
                      "drivers/pwm.h", "sys/printk.h"):
             header = temp / "zephyr" / name

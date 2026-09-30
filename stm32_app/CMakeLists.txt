@@ -75,12 +75,14 @@ target_sources(app PRIVATE
     ../logic/drive/encoder_math.c
     ../logic/drive/speed_pi.c
     ../logic/drive/speed_control.c
+    ../logic/sensing/current_sense.c
 )
 
 target_include_directories(app PRIVATE
     ../logic/steering
     ../logic/blinkers
     ../logic/drive
+    ../logic/sensing
 )
 
 endif()
