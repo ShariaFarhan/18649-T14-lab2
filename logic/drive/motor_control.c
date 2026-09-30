@@ -76,9 +76,10 @@ int motor_brake(motor_mapping_t motor)
     /* Disable the bridge while setting its two direction inputs. */
     int rc = pwm_set_pulse_dt(&m->pwm, 0U);
     if (rc != 0) goto fail;
-    rc = gpio_pin_set_dt(&m->in1, 1);
+    /* 11 - Set both direction pins HIGH (Dynamic Brake)[cite: 6] */
+    rc = gpio_pin_set_dt(&m->in1, 1); // Replaces gpio_set[cite: 6]
     if (rc != 0) goto fail;
-    rc = gpio_pin_set_dt(&m->in2, 1);
+    rc = gpio_pin_set_dt(&m->in2, 1); // Replaces gpio_set[cite: 6]
     if (rc != 0) goto fail;
 
     /* Pulse == period means EN stays HIGH, not a forward-drive command. */

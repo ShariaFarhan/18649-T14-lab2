@@ -17,7 +17,8 @@ typedef enum {
     FREE = 0,    /* Coast / High Impedance (00) */
     FORWARD,     /* Direction 1 */
     BACKWARD,    /* Direction 2 */
-    STOP         /* Dynamic brake: IN=11, EN high; duty ignored */
+    STOP         /* Dynamic Braking (11) */
+                 /* EN stays high; duty_cycle is ignored for STOP. */
 } direction_t;
 
 struct motor_attr {
