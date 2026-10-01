@@ -1,5 +1,5 @@
 """Wheel steering/lights with explicitly enabled dual-wheel speed control. No force effects."""
-import argparse,json,os,select,socket,struct,threading,time
+import argparse,json,os,select,socket,struct,sys,threading,time
 from pathlib import Path
 from wheel_dual_protocol import crc,uart_frame,drive_packet,unpack_drive_packet,unpack_heartbeat
 from self_test_button import SelfTestButton
@@ -115,11 +115,38 @@ def relay(args):
 
 
 def pc(args):
-    import ctypes
     from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
-    class Joy(ctypes.Structure):
-        _fields_=[(k,ctypes.c_uint) for k in ('size','flags','x','y','z','r','u','v','buttons','number','pov','r1','r2')]
-    api=ctypes.WinDLL('winmm');api.joyGetPosEx.argtypes=[ctypes.c_uint,ctypes.POINTER(Joy)]
+    if sys.platform=='darwin':
+        os.environ.setdefault('SDL_VIDEODRIVER','dummy')
+        os.environ.setdefault('SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS','1')
+        import pygame
+        pygame.init();pygame.joystick.init()
+        if pygame.joystick.get_count()<=args.device:
+            raise SystemExit('No joystick found. Power the wheel, connect USB, then retry.')
+        joystick=pygame.joystick.Joystick(args.device);joystick.init()
+        for name,index in (('steer',args.steer_axis),('throttle',args.throttle_axis),('brake',args.brake_axis)):
+            if not 0<=index<joystick.get_numaxes():
+                raise SystemExit(f'--{name}-axis {index} is invalid; run mac_proxy.py --probe first.')
+        print(f'Wheel: {joystick.get_name()} ({joystick.get_numaxes()} axes, {joystick.get_numbuttons()} buttons)',flush=True)
+        def read_wheel():
+            pygame.event.pump()
+            axis=lambda index,invert=False: max(0,min(65535,round(((-joystick.get_axis(index) if invert else joystick.get_axis(index))+1)*32767.5)))
+            buttons=sum((1<<i) for i in range(min(32,joystick.get_numbuttons())) if joystick.get_button(i))
+            return dict(x=axis(args.steer_axis,args.invert_steer),
+                        z=axis(args.throttle_axis,args.invert_throttle),
+                        r=axis(args.brake_axis,args.invert_brake),buttons=buttons),True
+    elif sys.platform.startswith('win'):
+        import ctypes
+        class Joy(ctypes.Structure):
+            _fields_=[(k,ctypes.c_uint) for k in ('size','flags','x','y','z','r','u','v','buttons','number','pov','r1','r2')]
+        api=ctypes.WinDLL('winmm');api.joyGetPosEx.argtypes=[ctypes.c_uint,ctypes.POINTER(Joy)]
+        def read_wheel():
+            joystick=Joy();joystick.size=ctypes.sizeof(joystick);joystick.flags=255
+            rc=api.joyGetPosEx(args.device,ctypes.byref(joystick))
+            raw={k:int(getattr(joystick,k)) for k in ('x','z','r','buttons')}
+            return raw,rc==0 and all(0<=raw[k]<=65535 for k in ('x','z','r'))
+    else:
+        raise SystemExit('The integrated wheel client currently supports macOS and Windows.')
     udp=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);udp.connect((args.pi,8000));udp.setblocking(False)
     lock=threading.Lock();done=threading.Event()
     state=dict(enabled=False,drive_enable=False,drive_acknowledged=False,drive_requested_at=0.,drive_notice='',
@@ -129,10 +156,7 @@ def pc(args):
     def worker():
         counter=0;test_button=SelfTestButton(args.test_button_bit);next_send=next_probe=0.;last_buttons=None
         while not done.is_set():
-            j=Joy();j.size=ctypes.sizeof(j);j.flags=255
-            rc=api.joyGetPosEx(args.device,ctypes.byref(j))
-            raw={k:int(getattr(j,k)) for k in ('x','z','r','buttons')}
-            ok=rc==0 and all(0<=raw[k]<=65535 for k in ('x','z','r'))
+            raw,ok=read_wheel()
             now=time.monotonic()
             changed=ok and raw['buttons']!=last_buttons
             if ok:
@@ -222,6 +246,7 @@ def pc(args):
     server=ThreadingHTTPServer(('127.0.0.1',args.web_port),Handler)
     print(f'Wheel read-only until Start: http://127.0.0.1:{args.web_port}',flush=True)
     try:server.serve_forever()
+    except KeyboardInterrupt:print('\nStopped.',flush=True)
     finally:done.set();server.server_close();udp.close()
 
 
@@ -229,5 +254,7 @@ if __name__=='__main__':
     p=argparse.ArgumentParser();sub=p.add_subparsers(dest='role',required=True)
     a=sub.add_parser('pi');a.add_argument('--uart',default='/dev/serial0');a.add_argument('--bind',default='0.0.0.0');a.add_argument('--pc-ip',required=True)
     a=sub.add_parser('pc');a.add_argument('--pi',required=True);a.add_argument('--device',type=int,default=0);a.add_argument('--web-port',type=int,default=8766)
+    a.add_argument('--steer-axis',type=int,default=0);a.add_argument('--throttle-axis',type=int,default=1);a.add_argument('--brake-axis',type=int,default=2)
+    a.add_argument('--invert-steer',action='store_true');a.add_argument('--invert-throttle',action='store_true');a.add_argument('--invert-brake',action='store_true')
     a.add_argument('--test-button-bit',type=int,default=2,help='X measured as bit 2 on this G920')
     args=p.parse_args();(relay if args.role=='pi' else pc)(args)

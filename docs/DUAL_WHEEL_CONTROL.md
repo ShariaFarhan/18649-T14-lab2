@@ -81,7 +81,9 @@ PC and Pi periodic sends now advance absolute deadlines to avoid accumulated
 schedule drift. Telemetry retains the latest system error and link-age snapshot.
 Physical button latency, GPIO response,
 heartbeat jitter and waveform timing still need scope verification. Host tests
-are not hardware timing evidence. Three current sensors are still a separate task.
+are not hardware timing evidence. Three ACS712 channels are now sampled on
+PC2/PC3/PC4 and returned as absolute milliamps; overcurrent trip thresholds are
+not yet enforced.
 
 ## Build and services
 
@@ -116,10 +118,11 @@ test counter (0..31), and sync (0/1): 283 bytes. This is a documented custom
 extension, not an unmodified course proxy packet. Older trailers are rejected.
 UART: 17-byte raw command: the prior 15-byte command plus test counter and
 test flags (bit 0 = sync). Main flags retain 0x01 stale and 0x08 drive enable.
-Heartbeat B9 is 25 bytes: previous B8 layout plus uint8 test-counter ack and
-uint8 system reason (NORMAL=0, STARTUP=1, LINK_LOST=2, BAD_INPUT=3,
+Heartbeat BA is 31 bytes: absolute left/right/servo milliamps, steering/light
+telemetry, drive telemetry, uint8 test-counter ack and uint8 system reason
+(NORMAL=0, STARTUP=1, LINK_LOST=2, BAD_INPUT=3,
 SELF_TEST=4, OUTPUT_FAULT=5). Startup is zone SYS_ERROR, not NORMAL.
-The legacy current-named words still carry test telemetry, not sensor readings.
+Current value 65535 means startup calibration was unavailable.
 
 Software checks exercise mean calculation, increased PWM on reduced feedback,
 both outputs, brake priority, startup timing, invalid-feedback pauses, absence

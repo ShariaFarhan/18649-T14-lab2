@@ -58,9 +58,9 @@
 	};
 
 	zephyr,user {
-		/* ACS712 divider outputs: right motor on PC3, servo on PC4. */
-		io-channels = <&adc1 13>, <&adc1 14>;
-		io-channel-names = "right-motor-current", "servo-current";
+		/* ACS712 divider outputs: left PC2, right PC3, servo PC4. */
+		io-channels = <&adc1 12>, <&adc1 13>, <&adc1 14>;
+		io-channel-names = "left-motor-current", "right-motor-current", "servo-current";
 	};
 
 };
@@ -150,13 +150,21 @@
  zephyr,user { cmd-rx-test-gpios = <&gpioc 10 GPIO_ACTIVE_HIGH>; };
 };
 
-/* ADC1: ACS712 divider outputs on PC3/ADC1_IN13 and PC4/ADC1_IN14. */
+/* ADC1: ACS712 divider outputs on PC2/IN12, PC3/IN13 and PC4/IN14. */
 &adc1 {
 	#address-cells = <1>;
 	#size-cells = <0>;
-	pinctrl-0 = <&adc1_in13_pc3 &adc1_in14_pc4>;
+	pinctrl-0 = <&adc1_in12_pc2 &adc1_in13_pc3 &adc1_in14_pc4>;
 	pinctrl-names = "default";
 	status = "okay";
+
+	channel@c {
+		reg = <12>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_MAX>;
+		zephyr,resolution = <12>;
+	};
 
 	channel@d {
 		reg = <13>;

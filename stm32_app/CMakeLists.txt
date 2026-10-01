@@ -60,9 +60,10 @@ if(LAB2_WHEEL_STEERING)
     if(LAB2_WHEEL_DUAL_DRIVE)
         target_sources(app PRIVATE ../logic/drive/dual_drive.c ../logic/drive/dual_speed_pid.c ../logic/drive/right_speed_model.c
             ../logic/drive/motor_control.c ../logic/drive/encoder.c ../logic/drive/encoder_math.c
+            ../logic/sensing/current_sense.c
             ../logic/system/system_state.c
             src/encoder_shell.c)
-        target_include_directories(app PRIVATE ../logic/drive ../logic/system)
+        target_include_directories(app PRIVATE ../logic/drive ../logic/sensing ../logic/system)
         # User observed negative right RPM while physically driving forward: invert feedback only.
         target_compile_definitions(app PRIVATE LAB2_WHEEL_DUAL_DRIVE=1 MOTOR_TIMING_WHEEL=LEFT_MOTOR
             ENCODER_RIGHT_DEFAULT_SIGN=-1)

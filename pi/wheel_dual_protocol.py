@@ -19,15 +19,18 @@ def unpack_drive_packet(data):
     return (*unpack_wheel(data[:276]),bool(data[280]),data[281],bool(data[282]))
 
 def unpack_heartbeat(payload):
-    if len(payload)!=25:raise ValueError('Expected error-state dual-drive heartbeat')
-    zone,marker,raw,packed,pulse,target,left,right,duty,flags,ack,system=struct.unpack('<BBHHHiiiHBBB',payload)
-    if marker!=0xB9 or ack>31 or system>5:raise ValueError('Not error-state dual-drive firmware')
+    if len(payload)!=31:raise ValueError('Expected current-sensing dual-drive heartbeat')
+    zone,marker,current_l,current_r,current_servo,raw,packed,pulse,target,left,right,duty,flags,ack,system=struct.unpack('<BB6HiiiHBBB',payload)
+    if marker!=0xBA or ack>31 or system>5:raise ValueError('Not current-sensing dual-drive firmware')
     reasons=['正常','指令超时','左编码器无效','右编码器无效','左轮计数反向','右轮计数反向',
              '左轮持续未转','右轮持续未转','驱动输出失败','输入无效','控制循环超时']
     reason=flags>>4
     systems=['NORMAL','STARTUP','LINK_LOST','BAD_INPUT','SELF_TEST','OUTPUT_FAULT']
     return dict(zone=zone,raw=raw,percent=(packed&255)-100,pulse_us=pulse,
                 light_mode=(packed>>8)&3,light_pins=(packed>>10)&15,dual_drive_available=True,
+                current_left_ma=None if current_l==0xFFFF else current_l,
+                current_right_ma=None if current_r==0xFFFF else current_r,
+                current_servo_ma=None if current_servo==0xFFFF else current_servo,
                 target_rpm=target/1000,left_rpm=left/1000,right_rpm=right/1000,
                 drive_rpm=(left+right)/2000,drive_pwm=duty,
                 drive_armed=bool(flags&1),drive_brake=bool(flags&2),drive_fault=bool(flags&4),

@@ -48,9 +48,7 @@ typedef struct {
     uint8_t  bus_degraded;     /* placeholder -- no CAN bus in this lab;
                                  * kept for wire-format continuity with
                                  * later labs that add one. Always 0 here. */
-    uint16_t current_motor_l;  /* TODO (Part 3.5): raw ADC or mA -- decide
-                                 * and document units once current sensors
-                                 * are wired; currently always 0 (unread). */
+    uint16_t current_motor_l;  /* Absolute current in mA; UINT16_MAX = unavailable. */
     uint16_t current_motor_r;
     uint16_t current_servo;
 #ifdef LAB2_WHEEL_RIGHT_DRIVE
@@ -60,6 +58,9 @@ typedef struct {
     uint8_t right_flags; /* armed, braking, fault, startup assist */
 #endif
 #ifdef LAB2_WHEEL_DUAL_DRIVE
+    uint16_t dual_steering_raw;
+    uint16_t dual_steering_packed;
+    uint16_t dual_servo_pulse_us;
     int32_t dual_target_mrpm;
     int32_t dual_left_mrpm;
     int32_t dual_right_mrpm;

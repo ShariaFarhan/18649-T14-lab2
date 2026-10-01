@@ -402,7 +402,7 @@ static int cmd_current_init(const struct shell *sh, size_t argc, char **argv)
 		return rc;
 	}
 
-	shell_print(sh, "Current sensor ADC initialized (PC3 right, PC4 servo)");
+	shell_print(sh, "Current sensor ADC initialized (PC2 left, PC3 right, PC4 servo)");
 	return 0;
 }
 
@@ -427,8 +427,171 @@ static int cmd_current_zero(const struct shell *sh, size_t argc, char **argv)
 		return rc;
 	}
 
-	shell_print(sh, "Captured unloaded zero for both current sensors");
+	shell_print(sh, "Captured unloaded zero for all current sensors");
 	return print_current_readings(sh);
+}
+
+static int cmd_current_servo_sweep(const struct shell *sh, size_t argc,
+				   char **argv)
+{
+	struct current_sense_sample sample;
+	int32_t minimum_ma = INT32_MAX;
+	int32_t maximum_ma = INT32_MIN;
+	int32_t peak_ma = 0;
+	int64_t total_ma = 0;
+	int64_t deadline;
+	uint32_t count = 0U;
+	int rc;
+
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	rc = current_sense_read(CURRENT_SENSE_SERVO, &sample);
+	if (rc != 0 || !sample.zero_valid) {
+		shell_error(sh, "Run 'current zero' with the servo supply off first");
+		return rc != 0 ? rc : -EACCES;
+	}
+
+	rc = servo_init();
+	if (rc != 0) {
+		shell_error(sh, "Servo initialization failed: %d", rc);
+		return rc;
+	}
+	/* Establish a known starting position before capturing a full movement. */
+	k_msleep(300);
+	rc = servo_set_steering(-50);
+	if (rc != 0) {
+		goto cleanup;
+	}
+	k_msleep(300);
+	rc = servo_set_steering(50);
+	if (rc != 0) {
+		goto cleanup;
+	}
+
+	deadline = k_uptime_get() + 600;
+	while (k_uptime_get() < deadline) {
+		int32_t magnitude;
+
+		rc = current_sense_read(CURRENT_SENSE_SERVO, &sample);
+		if (rc != 0) {
+			goto cleanup;
+		}
+		minimum_ma = MIN(minimum_ma, sample.current_ma);
+		maximum_ma = MAX(maximum_ma, sample.current_ma);
+		magnitude = sample.current_ma < 0 ? -sample.current_ma
+						 : sample.current_ma;
+		peak_ma = MAX(peak_ma, magnitude);
+		total_ma += sample.current_ma;
+		count++;
+		k_msleep(2);
+	}
+
+cleanup:
+	(void)servo_center();
+	k_msleep(200);
+	(void)servo_disable();
+	if (rc != 0) {
+		shell_error(sh, "Servo current capture failed: %d", rc);
+		return rc;
+	}
+	if (count == 0U) {
+		return -EIO;
+	}
+
+	shell_print(sh,
+		    "Servo sweep captured %u readings: min=%+d mA max=%+d mA average=%+lld mA peak_abs=%d mA",
+		    count, minimum_ma, maximum_ma,
+		    (long long)(total_ma / count), peak_ma);
+	shell_print(sh, "Servo returned to center and PWM is off");
+	return 0;
+}
+
+static int cmd_current_motor_run(const struct shell *sh, size_t argc,
+				 char **argv)
+{
+	enum current_sense_channel channel;
+	motor_mapping_t motor;
+	const char *name;
+	struct current_sense_sample sample;
+	int32_t minimum_ma = INT32_MAX;
+	int32_t maximum_ma = INT32_MIN;
+	int32_t peak_ma = 0;
+	int64_t total_ma = 0;
+	int64_t deadline;
+	uint32_t count = 0U;
+	int rc;
+
+	if (argc != 2) {
+		shell_error(sh, "Usage: current motor_run <left|right>");
+		return -EINVAL;
+	}
+	if (strcmp(argv[1], "left") == 0) {
+		channel = CURRENT_SENSE_LEFT_MOTOR;
+		motor = LEFT_MOTOR;
+		name = "Left";
+	} else if (strcmp(argv[1], "right") == 0) {
+		channel = CURRENT_SENSE_RIGHT_MOTOR;
+		motor = RIGHT_MOTOR;
+		name = "Right";
+	} else {
+		shell_error(sh, "Expected left or right");
+		return -EINVAL;
+	}
+
+	rc = current_sense_read(channel, &sample);
+	if (rc != 0 || !sample.zero_valid) {
+		shell_error(sh, "Run 'current zero' with both outputs inactive first");
+		return rc != 0 ? rc : -EACCES;
+	}
+
+	rc = sys_motor_set(motor, 50U, FORWARD);
+	if (rc != 0) {
+		shell_error(sh, "%s motor start failed: %d", name, rc);
+		return rc;
+	}
+
+	deadline = k_uptime_get() + 600;
+	while (k_uptime_get() < deadline) {
+		int32_t magnitude;
+
+		rc = current_sense_read(channel, &sample);
+		if (rc != 0) {
+			break;
+		}
+		minimum_ma = MIN(minimum_ma, sample.current_ma);
+		maximum_ma = MAX(maximum_ma, sample.current_ma);
+		magnitude = sample.current_ma < 0 ? -sample.current_ma
+						 : sample.current_ma;
+		peak_ma = MAX(peak_ma, magnitude);
+		total_ma += sample.current_ma;
+		count++;
+		k_msleep(2);
+	}
+
+	/* Cleanup is unconditional: never leave the motor enabled after capture. */
+	{
+		int stop_rc = sys_motor_set(motor, 0U, FREE);
+
+		if (rc == 0 && stop_rc != 0) {
+			rc = stop_rc;
+		}
+	}
+	if (rc != 0) {
+		shell_error(sh, "%s motor current capture failed; coast requested: %d",
+			    name, rc);
+		return rc;
+	}
+	if (count == 0U) {
+		return -EIO;
+	}
+
+	shell_print(sh,
+		    "%s motor 50%% captured %u readings: min=%+d mA max=%+d mA average=%+lld mA peak_abs=%d mA",
+		    name, count, minimum_ma, maximum_ma,
+		    (long long)(total_ma / count), peak_ma);
+	shell_print(sh, "%s motor is coasting with EN off", name);
+	return 0;
 }
 
 SHELL_STATIC_SUBCMD_SET_CREATE(
@@ -438,6 +601,12 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 		  cmd_current_read),
 	SHELL_CMD(zero, NULL, "Capture unloaded readings as zero current",
 		  cmd_current_zero),
+	SHELL_CMD(servo_sweep, NULL,
+		  "Sweep servo -50 to +50 while capturing PC4 current",
+		  cmd_current_servo_sweep),
+	SHELL_CMD(motor_run, NULL,
+		  "Run motor at 50% for 600 ms: current motor_run <left|right>",
+		  cmd_current_motor_run),
 	SHELL_SUBCMD_SET_END);
 
 SHELL_CMD_REGISTER(current, &current_commands, "ACS712 current sensor commands",
@@ -474,7 +643,7 @@ int main(void)
 		printk("Blinker initialization failed: %d\n", blinker_rc);
 	}
 	if (current_rc == 0) {
-		printk("Current sensors ready: PC3 right motor, PC4 servo. Type 'current'.\n");
+		printk("Current sensors ready: PC2 left, PC3 right, PC4 servo. Type 'current'.\n");
 		printk("Run 'current zero' only with both loads off or disconnected.\n");
 	} else {
 		printk("Current sensor initialization failed: %d\n", current_rc);

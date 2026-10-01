@@ -28,6 +28,8 @@
 #endif
 
 static const struct adc_dt_spec channels[CURRENT_SENSE_CHANNEL_COUNT] = {
+	[CURRENT_SENSE_LEFT_MOTOR] =
+		ADC_DT_SPEC_GET_BY_NAME(CURRENT_SENSE_NODE, left_motor_current),
 	[CURRENT_SENSE_RIGHT_MOTOR] =
 		ADC_DT_SPEC_GET_BY_NAME(CURRENT_SENSE_NODE, right_motor_current),
 	[CURRENT_SENSE_SERVO] =
@@ -35,6 +37,7 @@ static const struct adc_dt_spec channels[CURRENT_SENSE_CHANNEL_COUNT] = {
 };
 
 static const char *const channel_names[CURRENT_SENSE_CHANNEL_COUNT] = {
+	[CURRENT_SENSE_LEFT_MOTOR] = "left-motor",
 	[CURRENT_SENSE_RIGHT_MOTOR] = "right-motor",
 	[CURRENT_SENSE_SERVO] = "servo",
 };
@@ -171,6 +174,10 @@ int current_sense_zero_all(void)
 				  &measured_mv[i]);
 		if (rc != 0) {
 			return rc;
+		}
+		/* An unpowered ACS712 sits near ground, not its VCC/2 offset. */
+		if (measured_mv[i] < 1000 || measured_mv[i] > 2500) {
+			return -ERANGE;
 		}
 	}
 

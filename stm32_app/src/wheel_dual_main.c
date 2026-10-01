@@ -8,6 +8,7 @@
 #include "wheel_buttons.h"
 #include "blinkers.h"
 #include "dual_drive.h"
+#include "current_sense.h"
 #include "system_state.h"
 #define ALLOWED_FLAGS (FLAG_UDP_STALE | FLAG_DUAL_ENABLE)
 
@@ -17,6 +18,21 @@ static struct wheel_buttons buttons;
 static bool servo_ready,lights_ready,active;
 static int32_t raw_steering=WHEEL_RAW_CENTER;
 static int16_t steering_percent;
+
+static uint16_t current_magnitude(enum current_sense_channel channel)
+{
+    struct current_sense_sample sample;
+    if(current_sense_read(channel,&sample) || !sample.zero_valid)return UINT16_MAX;
+    int64_t magnitude=sample.current_ma;
+    if(magnitude<0)magnitude=-magnitude;
+    return magnitude>UINT16_MAX-1 ? UINT16_MAX-1 : (uint16_t)magnitude;
+}
+void pi_link_get_currents(uint16_t *left,uint16_t *right,uint16_t *servo)
+{
+    *left=current_magnitude(CURRENT_SENSE_LEFT_MOTOR);
+    *right=current_magnitude(CURRENT_SENSE_RIGHT_MOTOR);
+    *servo=current_magnitude(CURRENT_SENSE_SERVO);
+}
 
 static uint8_t zone_for(enum system_reason reason)
 {
@@ -107,11 +123,11 @@ void pi_link_customize_heartbeat(hb_payload_t *hb)
         system_state_output_failed(&system);error_outputs_locked();drive=dual_drive_get();
     }
     enum system_reason reason=system_state_reason(&system);
-    hb->zone_state=zone_for(reason);hb->bus_degraded=0xB9;
-    hb->current_motor_l=(uint16_t)raw_steering;
-    hb->current_motor_r=(uint16_t)(steering_percent+100) |
+    hb->zone_state=zone_for(reason);hb->bus_degraded=0xBA;
+    hb->dual_steering_raw=(uint16_t)raw_steering;
+    hb->dual_steering_packed=(uint16_t)(steering_percent+100) |
         ((uint16_t)blinkers_get_mode()<<8) | ((uint16_t)((GPIOC->ODR>>6)&15U)<<10);
-    hb->current_servo=(uint16_t)servo_get_last_pulse_us();
+    hb->dual_servo_pulse_us=(uint16_t)servo_get_last_pulse_us();
     hb->dual_target_mrpm=drive.target_mrpm;
     hb->dual_left_mrpm=drive.left_mrpm;hb->dual_right_mrpm=drive.right_mrpm;
     hb->dual_duty_percent=drive.duty_percent;
@@ -147,9 +163,12 @@ int main(void)
     wheel_buttons_reset(&buttons);
     system_state_init(&system,motor_rc==0 && lights_ready && servo_ready);
     error_outputs_locked(); /* STARTUP = both motors braked + 2 Hz hazards, servo initially OFF. */
+    int current_rc=current_sense_init();
+    if(!current_rc)current_rc=current_sense_zero_all();
     pi_link_init();
     printk("DUAL PID + ERROR STATE: boot braked/hazards; valid stream restores normal.\n");
     printk("Wheel self-test: single press fail, double press <=500 ms recover; debounce 50 ms.\n");
     printk("Use steering_status. PA8 PWM %u/%u/%u us.\n",SERVO_PULSE_LEFT_US,SERVO_PULSE_CENTER_US,SERVO_PULSE_RIGHT_US);
+    printk("Current sensing PC2/PC3/PC4 startup calibration: %d (65535 means unavailable).\n",current_rc);
     return 0;
 }

@@ -1,45 +1,81 @@
-<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>双轮平均速度 · 转向 · 灯光</title><style>
-body{font:17px system-ui;background:#f3f5fa;color:#18304b;padding:30px}main{max-width:620px;margin:auto;background:white;border-radius:16px;padding:28px}h1{font-size:26px}p{line-height:1.6;color:#657188}button{font:17px system-ui;padding:14px;border:0;border-radius:10px;cursor:pointer;color:white}.buttons{display:flex;gap:16px}.buttons button{flex:1}#start{background:#2460cd}#stop{background:#b32640}.box{background:#f0f4fa;padding:18px;border-radius:10px;line-height:2;margin:18px 0}#error{color:#b32640}
-</style><main><h1>双轮平均速度 · 转向 · 灯光</h1><p>G920 → Pi 4 → STM32 · 双编码器闭环</p>
-<div class="box"><div id="systemState">系统：等待回传</div><div id="wheel">检测方向盘…</div><div id="raw">原始值：—</div><div id="output">STM32：等待数据</div><div id="lights">灯光：等待回传</div><div id="keys">LSB / RSB：未按下</div></div>
-<div class="buttons"><button id="start">开始跟随</button><button id="stop">停止并进入安全状态</button></div>
-<div class="box"><div id="drive">双电机：等待固件回传</div><div id="wheelSpeeds">左 — RPM · 右 — RPM</div><div id="speed">目标 — RPM · 实测 — RPM · PWM —%</div><div id="driveNotice"></div></div>
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dual-Wheel Speed · Steering · Lights</title><style>
+body{font:17px system-ui;background:#f3f5fa;color:#18304b;padding:30px}main{max-width:620px;margin:auto;background:white;border-radius:16px;padding:28px}h1{font-size:26px;margin:0}.top{display:flex;align-items:center;justify-content:space-between;gap:16px}.language{background:#53657a;padding:9px 13px;white-space:nowrap}p{line-height:1.6;color:#657188}button{font:17px system-ui;padding:14px;border:0;border-radius:10px;cursor:pointer;color:white}.buttons{display:flex;gap:16px}.buttons button{flex:1}#start{background:#2460cd}#stop{background:#b32640}.box{background:#f0f4fa;padding:18px;border-radius:10px;line-height:2;margin:18px 0}#error{color:#b32640}
+</style><main><div class="top"><h1 id="title">Dual-Wheel Speed · Steering · Lights</h1><button id="language" class="language">中文</button></div><p id="subtitle">G920 → Pi 4 → STM32 · dual-encoder closed loop</p>
+<div class="box"><div id="systemState">System: waiting for telemetry</div><div id="wheel">Detecting steering wheel…</div><div id="raw">Raw values: —</div><div id="output">STM32: waiting for telemetry</div><div id="current">Current: waiting for telemetry</div><div id="lights">Lights: waiting for telemetry</div><div id="keys">LSB / RSB: released</div></div>
+<div class="buttons"><button id="start">Start control</button><button id="stop">Stop and enter safe state</button></div>
+<div class="box"><div id="drive">Dual motors: waiting for firmware</div><div id="wheelSpeeds">Left — RPM · Right — RPM</div><div id="speed">Target — RPM · Average — RPM · PWM —%</div><div id="driveNotice"></div></div>
 
-<p>开始跟随后，先松开踏板，随后踩油门就运行。松油门滑行，刹车优先；目标 0～280 RPM。首次起转辅助 40%／最长约 150 ms。</p>
-<p><strong>X 键：单击故障，双击恢复</strong>（两次间隔 50～500 ms）。Error 时电机刹车，四灯 2 Hz 双闪。</p>
-<div class="buttons"><button id="bad" style="background:#8b4b13">注入越界输入</button><button id="restore" style="background:#2460cd">恢复正常输入</button></div>
-<p id="mode">当前只读取，不控制舵机。</p><p id="error"></p>
-<p>当前测试范围 <strong>1000–2000 μs</strong>，中位 1500 μs。先轻轻左右转动，确认方向。</p>
-<p><strong>LSB 左闪 · RSB 右闪</strong><br>再按同侧关闭，按另一侧切换。前后同步，亮 0.5 秒、灭 0.5 秒。转过阈值后回正也会关闭。</p>
-<p>两轮架空，两个编码器均需连接。保持油门不变，观察平均 RPM 下降时 PWM 是否自动增加；本测试版不因反向计数或停转锁定；不要持续堵住轮子。使用 Windows 原生读取，不发送方向盘力反馈。</p></main>
+<p id="driveHelp">After starting control, release both pedals before pressing the throttle. Releasing the throttle coasts; the brake has priority. Target range: 0–280 RPM. Initial launch assistance: 40% for up to about 150 ms.</p>
+<p id="selfTestHelp"><strong>X button: single press triggers a test fault; double press recovers</strong> (50–500 ms between presses). During a fault, the motors brake and all four lights flash at 2 Hz.</p>
+<div class="buttons"><button id="bad" style="background:#8b4b13">Inject invalid input (forces FAIL)</button><button id="restore" style="background:#2460cd">Restore valid input</button></div>
+<p id="mode">Read-only; the servo is not being controlled.</p><p id="error"></p>
+<p id="servoHelp">Current test range: <strong>1000–2000 μs</strong>, centered at 1500 μs. Move the wheel gently at first to confirm direction.</p>
+<p id="lightHelp"><strong>LSB: left indicators · RSB: right indicators</strong><br>Press the same button again to turn them off, or press the other button to switch sides. Front and rear flash together: 0.5 seconds on and 0.5 seconds off. Returning the wheel to center after crossing the threshold also cancels them.</p>
+<p id="safetyHelp">Keep both wheels raised and connect both encoders. At constant throttle, verify that PWM increases if average RPM falls. This test build does not lock out on reversed encoder counts or a stopped wheel; never hold a wheel stalled. No force feedback is sent to the steering wheel.</p></main>
 <script>
-const el=id=>document.getElementById(id);async function post(path){let r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});if(!r.ok)throw Error(await r.text());return r.json()}
+const el=id=>document.getElementById(id);
+let language='en',latestState=null;
+const staticText={
+ en:{title:'Dual-Wheel Speed · Steering · Lights',subtitle:'G920 → Pi 4 → STM32 · dual-encoder closed loop',start:'Start control',stop:'Stop and enter safe state',bad:'Inject invalid input (forces FAIL)',restore:'Restore valid input',driveHelp:'After starting control, release both pedals before pressing the throttle. Releasing the throttle coasts; the brake has priority. Target range: 0–280 RPM. Initial launch assistance: 40% for up to about 150 ms.',selfTestHelp:'<strong>X button: single press triggers a test fault; double press recovers</strong> (50–500 ms between presses). During a fault, the motors brake and all four lights flash at 2 Hz.',servoHelp:'Current test range: <strong>1000–2000 μs</strong>, centered at 1500 μs. Move the wheel gently at first to confirm direction.',lightHelp:'<strong>LSB: left indicators · RSB: right indicators</strong><br>Press the same button again to turn them off, or press the other button to switch sides. Front and rear flash together: 0.5 seconds on and 0.5 seconds off. Returning the wheel to center after crossing the threshold also cancels them.',safetyHelp:'Keep both wheels raised and connect both encoders. At constant throttle, verify that PWM increases if average RPM falls. This test build does not lock out on reversed encoder counts or a stopped wheel; never hold a wheel stalled. No force feedback is sent to the steering wheel.'},
+ zh:{title:'双轮平均速度 · 转向 · 灯光',subtitle:'G920 → Pi 4 → STM32 · 双编码器闭环',start:'开始跟随',stop:'停止并进入安全状态',bad:'注入越界输入（强制故障）',restore:'恢复正常输入',driveHelp:'开始跟随后，先松开踏板，随后踩油门就运行。松油门滑行，刹车优先；目标 0～280 RPM。首次起转辅助 40%／最长约 150 ms。',selfTestHelp:'<strong>X 键：单击故障，双击恢复</strong>（两次间隔 50～500 ms）。故障时电机刹车，四灯 2 Hz 双闪。',servoHelp:'当前测试范围：<strong>1000–2000 μs</strong>，中位 1500 μs。先轻轻左右转动，确认方向。',lightHelp:'<strong>LSB 左闪 · RSB 右闪</strong><br>再按同侧关闭，按另一侧切换。前后同步，亮 0.5 秒、灭 0.5 秒。转过阈值后回正也会关闭。',safetyHelp:'两轮架空，两个编码器均需连接。保持油门不变，观察平均 RPM 下降时 PWM 是否自动增加；本测试版不因反向计数或停转锁定；不要持续堵住轮子。不发送方向盘力反馈。'}
+};
+const faultEnglish={'正常':'Normal','指令超时':'Command timeout','左编码器无效':'Left encoder invalid','右编码器无效':'Right encoder invalid','左轮计数反向':'Left encoder reversed','右轮计数反向':'Right encoder reversed','左轮持续未转':'Left wheel not turning','右轮持续未转':'Right wheel not turning','驱动输出失败':'Drive output failure','输入无效':'Invalid input','控制循环超时':'Control-loop timeout'};
+const noticeEnglish={'已暂停；松开两个踏板后自动就绪。':'Paused; release both pedals to become ready.'};
+function renderStatic(){
+ const t=staticText[language];document.documentElement.lang=language;document.title=t.title;
+ for(const id of ['title','subtitle','start','stop','bad','restore','driveHelp'])el(id).textContent=t[id];
+ for(const id of ['selfTestHelp','servoHelp','lightHelp','safetyHelp'])el(id).innerHTML=t[id];
+ el('language').textContent=language==='en'?'中文':'English';renderStatus(latestState);
+}
+function renderStatus(s){
+ const en=language==='en';
+ if(!s){
+  el('systemState').textContent=en?'System: waiting for telemetry':'系统：等待回传';
+  el('wheel').textContent=en?'Detecting steering wheel…':'检测方向盘…';
+  el('raw').textContent=en?'Raw values: —':'原始值：—';
+  el('output').textContent=en?'STM32: waiting for telemetry':'STM32：等待回传';
+  el('current').textContent=en?'Current: waiting for telemetry':'电流：等待回传';
+  el('lights').textContent=en?'Lights: waiting for telemetry':'灯光：等待回传';
+  el('keys').textContent=en?'Buttons: disconnected':'按钮：未连接';
+  el('drive').textContent=en?'Dual motors: waiting for firmware':'双电机：等待固件回传';
+  el('wheelSpeeds').textContent=en?'Left — RPM · Right — RPM':'左 — RPM · 右 — RPM';
+  el('speed').textContent=en?'Target — RPM · Average — RPM · PWM —%':'目标 — RPM · 平均 — RPM · PWM —%';return;
+ }
+ el('systemState').textContent=s.stm?(en?`System: ${s.stm.system_state}`:`系统：${s.stm.system_state}`):(en?'System: waiting for telemetry':'系统：等待回传');
+ el('systemState').style.color=s.stm&&s.stm.system_reason===0?'#1b6e35':'#b32640';
+ el('wheel').textContent=s.wheel_ok?(en?'Steering wheel connected':'方向盘已连接'):(en?'Steering wheel disconnected':'方向盘未连接');
+ el('raw').textContent=s.raw?(en?`Steering X=${s.raw.x} · Throttle Z=${s.raw.z} · Brake R=${s.raw.r}`:`方向盘 X=${s.raw.x} · 油门 Z=${s.raw.z} · 刹车 R=${s.raw.r}`):(en?'Raw values: —':'原始值：—');
+ el('keys').textContent=s.raw?(en?`LSB: ${s.raw.buttons&512?'pressed':'released'} · RSB: ${s.raw.buttons&256?'pressed':'released'} · X: ${s.raw.buttons&4?'pressed':'released'}`:`LSB：${s.raw.buttons&512?'按下':'松开'} · RSB：${s.raw.buttons&256?'按下':'松开'} · X：${s.raw.buttons&4?'按下':'松开'}`):(en?'Buttons: disconnected':'按钮：未连接');
+ el('mode').textContent=s.enabled?(en?'Control active; stopping or losing the link applies the brake and hazard lights.':'跟随中；停止或失联时刹车、双闪。'):(en?'Stopped; select Start control to enable pedals, steering, and lights.':'已停止；点“开始跟随”启用踏板、转向和灯光。');
+ el('output').textContent=s.stm?(en?`STM32: ${s.stm.pulse_us} μs · steering ${s.stm.percent}% · zone ${s.stm.zone}`:`STM32：${s.stm.pulse_us} μs · 转向 ${s.stm.percent}% · 状态 ${s.stm.zone}`):(en?'STM32: waiting for telemetry':'STM32：等待回传');
+ el('current').textContent=s.stm?(en?`Current: left ${s.stm.current_left_ma??'—'} mA · right ${s.stm.current_right_ma??'—'} mA · servo ${s.stm.current_servo_ma??'—'} mA`:`电流：左 ${s.stm.current_left_ma??'—'} mA · 右 ${s.stm.current_right_ma??'—'} mA · 舵机 ${s.stm.current_servo_ma??'—'} mA`):(en?'Current: waiting for telemetry':'电流：等待回传');
+ const lightNames=en?['off','left','right','hazards']:['关闭','左闪','右闪','双闪'];
+ const pinNames=en?['front left','front right','rear left','rear right']:['左前','右前','左后','右后'];
+ el('lights').textContent=s.stm&&s.stm.light_mode!=null?(en?`Lights: ${lightNames[s.stm.light_mode]} · outputs ${pinNames.filter((_,i)=>s.stm.light_pins&(1<<i)).join(', ')||'all off'}`:`灯光：${lightNames[s.stm.light_mode]} · 输出 ${pinNames.filter((_,i)=>s.stm.light_pins&(1<<i)).join('、')||'全灭'}`):(en?'Lights: waiting for telemetry':'灯光：等待回传');
+ const d=s.stm&&s.stm.dual_drive_available?s.stm:null;
+ let driveState;
+ if(!d)driveState=en?'firmware unavailable':'固件未就绪';
+ else if(d.drive_fault)driveState=en?'fault—stop and inspect':'故障，请停止并检查';
+ else if(d.drive_armed)driveState=d.drive_brake?(en?'braking':'刹车'):d.drive_boost?(en?'launch assistance':'启动辅助'):(en?'pedal control ready':'踏板控制已就绪');
+ else driveState=s.enabled?(en?'release both pedals; waiting to arm':'松开两个踏板，等待就绪'):(en?'stopped':'已停止');
+ el('drive').textContent=(en?'Dual motors: ':'双电机：')+driveState;
+ const reason=d&&(en?(faultEnglish[d.fault_reason]||d.fault_reason):d.fault_reason);
+ const notice=en?(noticeEnglish[s.drive_notice]||s.drive_notice):s.drive_notice;
+ el('driveNotice').textContent=d&&d.drive_fault?(en?`Protection reason: ${reason}`:`保护原因：${reason}`):(notice||'');
+ el('wheelSpeeds').textContent=d?(en?`Left ${d.left_rpm.toFixed(1)} RPM · Right ${d.right_rpm.toFixed(1)} RPM`:`左 ${d.left_rpm.toFixed(1)} RPM · 右 ${d.right_rpm.toFixed(1)} RPM`):(en?'Left — RPM · Right — RPM':'左 — RPM · 右 — RPM');
+ el('speed').textContent=d?(en?`Target ${d.target_rpm.toFixed(1)} RPM · Average ${d.drive_rpm.toFixed(1)} RPM · PWM ${d.drive_pwm}%`:`目标 ${d.target_rpm.toFixed(1)} RPM · 平均 ${d.drive_rpm.toFixed(1)} RPM · PWM ${d.drive_pwm}%`):(en?'Target — RPM · Average — RPM · PWM —%':'目标 — RPM · 平均 — RPM · PWM —%');
+}
+async function post(path){let r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});if(!r.ok)throw Error(await r.text());return r.json()}
+el('language').onclick=()=>{language=language==='en'?'zh':'en';renderStatic()};
 el('start').onclick=()=>post('/start').catch(e=>el('error').textContent=e.message);
 el('stop').onclick=()=>post('/stop').catch(e=>el('error').textContent=e.message);
 el('bad').onclick=()=>post('/bad_input').catch(e=>el('error').textContent=e.message);
 el('restore').onclick=()=>post('/restore_input').then(()=>el('error').textContent='').catch(e=>el('error').textContent=e.message);
-
-
 async function poll(){
- try{
-  let s=await post('/status');
-  el('systemState').textContent=s.stm?`系统：${s.stm.system_state}`:'系统：等待回传';
-  el('systemState').style.color=s.stm&&s.stm.system_reason===0?'#1b6e35':'#b32640';
-  el('wheel').textContent=s.wheel_ok?'方向盘已连接':'方向盘未连接';
-  el('raw').textContent=s.raw?`方向盘 X=${s.raw.x} · 油门 Z=${s.raw.z} · 刹车 R=${s.raw.r}`:'原始值：—';
-  el('keys').textContent=s.raw?`LSB：${s.raw.buttons&512?'按下':'松开'} · RSB：${s.raw.buttons&256?'按下':'松开'} · X：${s.raw.buttons&4?'按下':'松开'}`:'按钮：未连接';
-  el('mode').textContent=s.enabled?'跟随中；停止或失联时刹车、双闪。':'已停止；点“开始跟随”启用踏板、转向和灯光。';
-  el('output').textContent=s.stm?`STM32：${s.stm.pulse_us} μs · 转向 ${s.stm.percent}% · 状态 ${s.stm.zone}`:'STM32：等待回传';
-  el('lights').textContent=s.stm&&s.stm.light_mode!=null?`灯光：${['关闭','左闪','右闪','双闪'][s.stm.light_mode]} · 输出 ${['左前','右前','左后','右后'].filter((_,i)=>s.stm.light_pins&(1<<i)).join('、')||'全灭'}`:'灯光：等待回传';
-  let d=s.stm&&s.stm.dual_drive_available?s.stm:null;
-
-  el('drive').textContent=d?`双电机：${d.drive_fault?'故障，请停止并检查':d.drive_armed?(d.drive_brake?'刹车':d.drive_boost?'启动辅助':'踏板控制已就绪'):(s.enabled?'松开两个踏板，等待就绪':'已停止')}`:'双电机：固件未就绪';
-  el('driveNotice').textContent=d&&d.drive_fault?`保护原因：${d.fault_reason}`:(s.drive_notice||'');
-  el('wheelSpeeds').textContent=d?`左 ${d.left_rpm.toFixed(1)} RPM · 右 ${d.right_rpm.toFixed(1)} RPM`:'左 — RPM · 右 — RPM';
-  el('speed').textContent=d?`目标 ${d.target_rpm.toFixed(1)} RPM · 平均 ${d.drive_rpm.toFixed(1)} RPM · PWM ${d.drive_pwm}%`:'目标 — RPM · 实测 — RPM · PWM —%';
- }catch(e){el('systemState').textContent='系统：通信未连接';el('output').textContent='控制服务未连接';el('lights').textContent='灯光：状态未知';el('drive').textContent='双电机：状态未知'}
+ try{latestState=await post('/status');renderStatus(latestState)}
+ catch(e){latestState=null;renderStatus(null);el('systemState').textContent=language==='en'?'System: communication disconnected':'系统：通信未连接';el('output').textContent=language==='en'?'Control service disconnected':'控制服务未连接';el('lights').textContent=language==='en'?'Lights: status unknown':'灯光：状态未知';el('drive').textContent=language==='en'?'Dual motors: status unknown':'双电机：状态未知'}
  setTimeout(poll,100)
 }
-window.addEventListener('pagehide',()=>navigator.sendBeacon('/stop',new Blob(['{}'],{type:'application/json'})));poll();
+window.addEventListener('pagehide',()=>navigator.sendBeacon('/stop',new Blob(['{}'],{type:'application/json'})));renderStatic();poll();
 </script></html>
