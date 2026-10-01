@@ -52,13 +52,13 @@ if(LAB2_WHEEL_STEERING)
         target_compile_definitions(app PRIVATE LAB2_WHEEL_RIGHT_DRIVE=1 MOTOR_TIMING_WHEEL=RIGHT_MOTOR)
     endif()
     if(LAB2_WHEEL_DUAL_DRIVE)
-        target_sources(app PRIVATE ../logic/drive/dual_drive.c ../logic/drive/right_speed_model.c
+        target_sources(app PRIVATE ../logic/drive/dual_drive.c ../logic/drive/dual_speed_pid.c ../logic/drive/right_speed_model.c
             ../logic/drive/motor_control.c ../logic/drive/encoder.c ../logic/drive/encoder_math.c
             src/encoder_shell.c)
         target_include_directories(app PRIVATE ../logic/drive)
-        # Right forward polarity was reversed since the original encoder calibration.
+        # User observed negative right RPM while physically driving forward: invert feedback only.
         target_compile_definitions(app PRIVATE LAB2_WHEEL_DUAL_DRIVE=1 MOTOR_TIMING_WHEEL=LEFT_MOTOR
-            ENCODER_RIGHT_DEFAULT_SIGN=1)
+            ENCODER_RIGHT_DEFAULT_SIGN=-1)
     endif()
 elseif(LAB2_ENCODER_ONLY)
     target_sources(app PRIVATE src/encoder_only_main.c src/encoder_shell.c

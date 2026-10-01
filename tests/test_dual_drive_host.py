@@ -83,5 +83,5 @@ with tempfile.TemporaryDirectory() as directory:
     for name in ('kernel.h','drivers/gpio.h','drivers/pwm.h'):
         p=t/'zephyr'/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text('#include "stub.h"\n')
     (t/'test.c').write_text(TEST)
-    subprocess.run(['cc','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I',str(t),'-I',str(ROOT),str(t/'test.c'),str(ROOT/'logic/drive/right_speed_model.c'),'-o',str(t/'test')],check=True)
+    subprocess.run(['cc','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I',str(t),'-I',str(ROOT),str(t/'test.c'),str(ROOT/'logic/drive/right_speed_model.c'),str(ROOT/'logic/drive/dual_speed_pid.c'),'-o',str(t/'test')],check=True)
     subprocess.run([str(t/'test')],check=True)

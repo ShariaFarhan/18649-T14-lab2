@@ -1,26 +1,27 @@
 # Dual-wheel mean-speed control
 
-This profile extends the steering/light test to drive both motors with one PI
+This profile extends the steering/light test to drive both motors with one PID
 controller. It is separate from the old right-only profile and manual firmware.
 
 `feedback RPM = (signed left RPM + signed right RPM) / 2`
 
 Throttle sets 0..280 RPM with a 2% deadband. Both bridges receive the same PWM.
 Feedforward uses the measured right-wheel PWM/RPM curve as a provisional starting
-estimate; it is not a two-wheel loaded calibration. PI then adjusts PWM from
-the mean-speed error every 10 ms. Kp/Ki remain the previous initial values;
-there is no derivative term. Average regulation does not independently equalize
+estimate; it is not a two-wheel loaded calibration. PID then adjusts PWM from
+the mean-speed error every 10 ms. Initial gains are Kp=0.1%/RPM,
+Ki=0.2%/(RPM*s), Kd=0.001%/(RPM/s). D uses measured speed, a 50 ms
+low-pass filter and a 15%-duty contribution limit; it has no setpoint kick. Average regulation does not independently equalize
 the wheels' speeds.
 
 Both encoders use 1320 counts/rev. Both samples must be valid. Startup assistance
 is at least 40% PWM for up to 150 ms when starting from rest, ending early if
-mean speed reaches target. Brake cancels boost and PI immediately and brakes
+mean speed reaches target. Brake cancels boost and PID immediately and brakes
 both bridges; healthy zero throttle coasts both. Startup leaves drive disabled.
 
 Motor directions follow the latest shared driver: IN1=0/IN2=1 forward,
 IN1=1/IN2=0 reverse on both bridges. Brake uses IN1=IN2=0 with EN HIGH.
-This dual profile now uses left +1, right +1 to match the reversed right motor
-polarity; other profiles retain their defaults. Verify positive RPM in the intended forward
+This dual profile now uses left +1, right -1 after the user observed that
+physical right-wheel forward had negative reported RPM. Motor direction is unchanged. Verify positive RPM in the intended forward
 direction before closed-loop use. Never take absolute values to hide reversed
 feedback. Shell `encoder sign left/right 1/-1` can calibrate signs while stopped.
 
@@ -33,7 +34,7 @@ electrical output, not a measured torque value. Do not grab a rotating shaft
 or fully block a wheel. Real hardware tuning/load recovery is not yet verified.
 
 At the user's request, reverse-reading and no-motion fault latches are removed
-from this test profile. Sustained zero speed can therefore drive PI to its 100%
+from this test profile. Sustained zero speed can therefore drive PID to its 100%
 limit; this is not stall/overcurrent protection and wheels must not be held blocked.
 Brake priority, 0..100% PWM bounds, 60 ms command freshness, valid encoder data,
 250 ms control-loop freshness and output-error handling remain. A bad/missing
@@ -45,7 +46,7 @@ Hardware output failures remain visible until a successful stop update.
 
 Build with `LAB2_WHEEL_STEERING=ON`, `LAB2_WHEEL_DUAL_DRIVE=ON`, and
 `EXTRA_CONF_FILE=uart_diagnostic.conf`. Keep left-only/right-only/other profiles OFF.
-Use a separate build directory. The updated binary is `lab2-dual-pedal-control.bin`.
+Use a separate build directory. The updated binary is `lab2-dual-pedal-pid.bin`.
 
 On Pi (deploy `wheel_dual.py`, `wheel_dual_protocol.py`, `wheel_protocol.py`, and
 `test_points.py` together):

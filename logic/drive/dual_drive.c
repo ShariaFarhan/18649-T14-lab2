@@ -1,13 +1,14 @@
-/* One PI regulates signed mean RPM, applying the same PWM to both bridges. */
+/* One PID regulates signed mean RPM, applying the same PWM to both bridges. */
 #include "dual_drive.h"
 #include "right_speed_model.h" /* Right-wheel measured feedforward is an initial estimate only. */
+#include "dual_speed_pid.h"
 #include "motor_control.h"
 #include "encoder.h"
 #include <errno.h>
 #include <zephyr/kernel.h>
 static K_MUTEX_DEFINE(drive_lock);
 static struct dual_drive_status state;
-static struct right_pi controller;
+static struct dual_pid controller;
 static bool ready,arm_ready,ever_armed,brake_input,was_moving;
 static int throttle;
 static int64_t boost_until,last_update,last_command;
@@ -20,7 +21,7 @@ static int outputs(direction_t direction,uint16_t duty)
 }
 static int stop_locked(bool brake)
 {
-    controller.integral_micro=0;state.boosting=false;was_moving=false;
+    dual_pid_reset(&controller);state.boosting=false;was_moving=false;
     state.target_mrpm=0;state.duty_percent=0;state.braking=brake;
     int rc=outputs(brake?STOP:FREE,0);
     state.fault=rc!=0;
@@ -55,7 +56,7 @@ static int update_locked(void)
     if(!sample.wheel[ENCODER_RIGHT].valid)return pause_locked(DUAL_ENCODER_RIGHT);
     feedback_locked(&sample);
     if(!was_moving){
-        controller.integral_micro=0;last_update=now;
+        dual_pid_reset(&controller);last_update=now;
         boost_until=now+(state.actual_mrpm<5000?RIGHT_START_DURATION_MS:0);
         was_moving=true;
     }
@@ -67,7 +68,7 @@ static int update_locked(void)
         if(permille<RIGHT_START_DUTY_PERCENT*10)permille=RIGHT_START_DUTY_PERCENT*10;
     }else{
         boost_until=0;
-        if(right_pi_update(&controller,state.target_mrpm,state.actual_mrpm,
+        if(dual_pid_update(&controller,state.target_mrpm,state.actual_mrpm,
                            (uint32_t)(now-last_update)*1000,&permille))return pause_locked(DUAL_INPUT);
     }
     last_update=now;state.duty_percent=(permille+5)/10;state.braking=false;
