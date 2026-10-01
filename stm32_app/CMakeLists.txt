@@ -2,17 +2,21 @@ cmake_minimum_required(VERSION 3.28.0)
 
 option(LAB2_WHEEL_STEERING "Real wheel to steering, motors disabled" OFF)
 option(LAB2_WHEEL_RIGHT_DRIVE "Add right-wheel encoder speed control to wheel steering" OFF)
+option(LAB2_WHEEL_DUAL_DRIVE "Two-encoder mean-speed control, steering and lights" OFF)
 option(LAB2_ENCODER_ONLY "Standalone encoder readout without Pi or actuator PWM" OFF)
 if(LAB2_ENCODER_ONLY)
     list(APPEND EXTRA_DTC_OVERLAY_FILE "${CMAKE_CURRENT_SOURCE_DIR}/boards/encoder_only.overlay")
 endif()
 if(LAB2_WHEEL_STEERING)
-    if(NOT LAB2_WHEEL_RIGHT_DRIVE)
+    if(NOT LAB2_WHEEL_RIGHT_DRIVE AND NOT LAB2_WHEEL_DUAL_DRIVE)
         list(APPEND EXTRA_DTC_OVERLAY_FILE "${CMAKE_CURRENT_SOURCE_DIR}/boards/wheel_steering.overlay")
     endif()
 endif()
 if(LAB2_WHEEL_RIGHT_DRIVE AND NOT LAB2_WHEEL_STEERING)
     message(FATAL_ERROR "Right drive requires LAB2_WHEEL_STEERING")
+endif()
+if(LAB2_WHEEL_DUAL_DRIVE AND (LAB2_WHEEL_RIGHT_DRIVE OR NOT LAB2_WHEEL_STEERING))
+    message(FATAL_ERROR "Select only DUAL drive with LAB2_WHEEL_STEERING")
 endif()
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(lab2)
@@ -28,7 +32,12 @@ if(LAB2_ENCODER_ONLY AND LAB2_UART_PWM_BENCH)
     message(FATAL_ERROR "Select either encoder-only or actuator bench")
 endif()
 if(LAB2_WHEEL_STEERING)
-    target_sources(app PRIVATE src/wheel_steering_main.c
+    if(LAB2_WHEEL_DUAL_DRIVE)
+        target_sources(app PRIVATE src/wheel_dual_main.c)
+    else()
+        target_sources(app PRIVATE src/wheel_steering_main.c)
+    endif()
+    target_sources(app PRIVATE
         ../logic/steering/servo.c ../logic/steering/wheel_mapping.c
         ../logic/steering/wheel_buttons.c ../logic/blinkers/blinkers.c
         ../logic/comms/pi_link.c ../logic/comms/link_parser.c)
@@ -41,6 +50,15 @@ if(LAB2_WHEEL_STEERING)
             src/encoder_shell.c)
         target_include_directories(app PRIVATE ../logic/drive)
         target_compile_definitions(app PRIVATE LAB2_WHEEL_RIGHT_DRIVE=1 MOTOR_TIMING_WHEEL=RIGHT_MOTOR)
+    endif()
+    if(LAB2_WHEEL_DUAL_DRIVE)
+        target_sources(app PRIVATE ../logic/drive/dual_drive.c ../logic/drive/right_speed_model.c
+            ../logic/drive/motor_control.c ../logic/drive/encoder.c ../logic/drive/encoder_math.c
+            src/encoder_shell.c)
+        target_include_directories(app PRIVATE ../logic/drive)
+        # Right forward polarity was reversed since the original encoder calibration.
+        target_compile_definitions(app PRIVATE LAB2_WHEEL_DUAL_DRIVE=1 MOTOR_TIMING_WHEEL=LEFT_MOTOR
+            ENCODER_RIGHT_DEFAULT_SIGN=1)
     endif()
 elseif(LAB2_ENCODER_ONLY)
     target_sources(app PRIVATE src/encoder_only_main.c src/encoder_shell.c
