@@ -142,7 +142,7 @@ int motor_brake(motor_mapping_t motor)
     const struct motor_attr *m = &motors[motor];
 
     /* Equal direction inputs with EN high dynamically brake the L298N. */
-    return motor_apply(m, 0, 0, m->pwm.period,
+    return motor_apply(m, 1, 1, m->pwm.period,
                        motor == MOTOR_TIMING_WHEEL);
 }
 
