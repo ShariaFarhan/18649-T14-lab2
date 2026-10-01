@@ -99,10 +99,10 @@ int main(void) {
         for (uint32_t duty = 0; duty <= 100; duty++) {
             reset();
             assert(sys_motor_set(motor, duty, FORWARD) == 0);
-            assert(pins[2*motor] == 1 && pins[2*motor+1] == 0);
+            assert(pins[2*motor] == 0 && pins[2*motor+1] == 1);
             assert(pulses[motor] == duty * 500);
             assert(sys_motor_set(motor, duty, BACKWARD) == 0);
-            assert(pins[2*motor] == 0 && pins[2*motor+1] == 1);
+            assert(pins[2*motor] == 1 && pins[2*motor+1] == 0);
             assert(pulses[motor] == duty * 500);
             assert(sys_motor_set(motor, duty, STOP) == 0);
             assert(pins[2*motor] == pins[2*motor+1]);

@@ -169,9 +169,9 @@ int sys_motor_set(motor_mapping_t motor, uint32_t duty_cycle,
     case FREE:
         return motor_apply(m, 0, 0, 0U, mark_timing);
     case FORWARD:
-        return motor_apply(m, 1, 0, pulse_ns, mark_timing);
-    case BACKWARD:
         return motor_apply(m, 0, 1, pulse_ns, mark_timing);
+    case BACKWARD:
+        return motor_apply(m, 1, 0, pulse_ns, mark_timing);
     default:
         return -EINVAL;
     }

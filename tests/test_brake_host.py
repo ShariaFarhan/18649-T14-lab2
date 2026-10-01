@@ -51,9 +51,15 @@ int main(void) {
     assert(pulses[0]==50000 && pulses[1]==0);
     reset(); assert(sys_motor_set(LEFT_MOTOR,50,FORWARD)==0);
     assert(pulses[0]==25000 && marks==1);
+    assert(pins[0]==0 && pins[1]==1);
+    reset(); assert(sys_motor_set(LEFT_MOTOR,50,BACKWARD)==0);
+    assert(pins[0]==1 && pins[1]==0 && pulses[0]==25000);
     reset(); assert(sys_motor_set(LEFT_MOTOR,0,FREE)==0);
     assert(pulses[0]==0 && marks==1);
     reset(); assert(sys_motor_set(RIGHT_MOTOR,50,FORWARD)==0 && marks==0);
+    assert(pins[2]==0 && pins[3]==1 && pulses[1]==25000);
+    reset(); assert(sys_motor_set(RIGHT_MOTOR,50,BACKWARD)==0);
+    assert(pins[2]==1 && pins[3]==0 && pulses[1]==25000);
     puts("PASS: STOP ignores duty; full EN maintained; both motors attempted; errors propagated");
     return 0;
 }

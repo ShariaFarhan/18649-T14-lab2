@@ -36,6 +36,10 @@ typedef struct {
 #endif
     uint16_t buttons;      /* bitmask, see extract_buttons_mask() on the Pi */
     uint8_t  flags;        /* bit0 = FLAG_UDP_STALE */
+#ifdef LAB2_WHEEL_DUAL_DRIVE
+    uint8_t test_counter;  /* Debounced wheel-button press counter, modulo 32. */
+    uint8_t test_flags;    /* Bit 0 establishes a new sender's counter baseline. */
+#endif
 } cmd_payload_t;
 
 /* STM32 -> Pi, sent every 20ms +-10% (this project's heartbeat thread) */
@@ -55,12 +59,22 @@ typedef struct {
     uint16_t right_duty_percent;
     uint8_t right_flags; /* armed, braking, fault, startup assist */
 #endif
+#ifdef LAB2_WHEEL_DUAL_DRIVE
+    int32_t dual_target_mrpm;
+    int32_t dual_left_mrpm;
+    int32_t dual_right_mrpm;
+    uint16_t dual_duty_percent;
+    uint8_t dual_flags; /* armed/brake/fault/boost, then reason in high nibble */
+    uint8_t test_counter_ack;
+    uint8_t system_reason;
+#endif
 } hb_payload_t;
 
 #pragma pack(pop)
 
 #define FLAG_UDP_STALE  0x01
 #define FLAG_RIGHT_ENABLE 0x02 /* Only the separate right-drive test profile accepts this. */
+#define FLAG_DUAL_ENABLE 0x08 /* Only accepted by dual-motor firmware. */
 
 
 enum pi_link_zone_state {

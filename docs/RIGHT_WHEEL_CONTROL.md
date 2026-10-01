@@ -63,8 +63,12 @@ Leave other profiles OFF. Existing dual-wheel/manual code and its old 85 RPM
 placeholder are not used by this right-wheel profile.
 
 For timing in this profile, PWM_SET marks RIGHT updates; tap PA6 for PWM_OUT
-and PB12 for the forward-to-LOW/LOW-brake edge. Other profiles retain their
+and PB13 for the forward-to-LOW/LOW-brake edge after the motor direction reversal. Other profiles retain their
 LEFT timing marker. Actual timing compliance still requires scope measurements.
+
+The shared motor driver now uses IN1=LOW/IN2=HIGH for forward on both motors.
+Encoder signs have not changed; recheck that physical forward produces positive
+right RPM before rebuilding or running this closed-loop profile with that change.
 
 ## Transport and UI
 

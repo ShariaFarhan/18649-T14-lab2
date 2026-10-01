@@ -11,6 +11,7 @@
 
 #include "pi_link.h"
 #include "link_parser.h"
+#include "link_watchdog.h"
 #include "test_points.h"
 
 
@@ -41,9 +42,7 @@ static void uart_isr(const struct device *dev, void *user_data)
     // ISR does the absolute minimum: drain the UART FIFO into the ring
     // buffer. No parsing, no printk, no blocking, nothing that allocs
     
-    if (!uart_irq_update(dev)) {
-        return;
-    }
+    uart_irq_update(dev);
     if (!uart_irq_rx_ready(dev)) {
         return;
     }
@@ -69,6 +68,7 @@ static struct k_mutex state_lock;
 static K_MUTEX_DEFINE(dispatch_lock); /* Serialize command and timeout callbacks. */
 static atomic_t link_alive;
 static int64_t last_valid_cmd_uptime_ms; /* guarded by dispatch_lock */
+static struct link_watchdog command_watchdog; /* Same dispatch_lock; sole UART deadline owner. */
 static atomic_t last_timeout_age_ms;
 
 static enum pi_link_zone_state zone_override = ZONE_STATE_INIT; //mutex-guarded 
@@ -201,6 +201,7 @@ static void parser_thread_fn(void *a, void *b, void *c)
             }
             if (pi_link_command_is_fresh(&cmd, plausible)) {
                 last_valid_cmd_uptime_ms = k_uptime_get();
+                link_watchdog_feed(&command_watchdog,(uint64_t)last_valid_cmd_uptime_ms);
                 bool restored = !atomic_get(&link_alive);
                 atomic_set(&link_alive, true);
                 if (restored) pi_link_on_link_restored();
@@ -262,8 +263,9 @@ static void heartbeat_thread_fn(void *a, void *b, void *c)
     while (1) {
        
         k_mutex_lock(&dispatch_lock, K_FOREVER);
-        int64_t age = k_uptime_get() - last_valid_cmd_uptime_ms;
-        if (atomic_get(&link_alive) && age >= LINK_TIMEOUT_MS) {
+        int64_t now_check = k_uptime_get();
+        int64_t age = now_check - last_valid_cmd_uptime_ms;
+        if (link_watchdog_poll(&command_watchdog,(uint64_t)now_check)) {
             atomic_set(&link_alive, false);
             atomic_set(&last_timeout_age_ms, (atomic_val_t)age);
             pi_link_on_link_lost();
@@ -313,6 +315,7 @@ void pi_link_init(void)
     uart_irq_rx_enable(pi_uart_dev);
 
     last_valid_cmd_uptime_ms = k_uptime_get();
+    link_watchdog_init(&command_watchdog,LINK_TIMEOUT_MS);
     atomic_set(&link_alive, false); // No valid control source at startup
 
     k_thread_start(parser_tid);
