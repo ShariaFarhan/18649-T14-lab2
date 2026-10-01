@@ -42,8 +42,14 @@ if(LAB2_WHEEL_STEERING)
         ../logic/steering/wheel_buttons.c ../logic/blinkers/blinkers.c
         ../logic/comms/pi_link.c ../logic/comms/link_parser.c)
     target_include_directories(app PRIVATE ../logic/steering ../logic/comms ../logic/blinkers)
-    target_compile_definitions(app PRIVATE LAB2_RAW_WHEEL_LINK=1 LINK_TIMEOUT_MS=60
+    target_compile_definitions(app PRIVATE LAB2_RAW_WHEEL_LINK=1
         SERVO_PULSE_LEFT_US=1000U SERVO_PULSE_RIGHT_US=2000U)
+    if(LAB2_WHEEL_DUAL_DRIVE)
+        # Polled every 20 ms: nominal disconnect response <=95 ms plus output execution.
+        target_compile_definitions(app PRIVATE LINK_TIMEOUT_MS=75)
+    else()
+        target_compile_definitions(app PRIVATE LINK_TIMEOUT_MS=60)
+    endif()
     if(LAB2_WHEEL_RIGHT_DRIVE)
         target_sources(app PRIVATE ../logic/drive/right_drive.c ../logic/drive/right_speed_model.c
             ../logic/drive/motor_control.c ../logic/drive/encoder.c ../logic/drive/encoder_math.c
@@ -54,8 +60,9 @@ if(LAB2_WHEEL_STEERING)
     if(LAB2_WHEEL_DUAL_DRIVE)
         target_sources(app PRIVATE ../logic/drive/dual_drive.c ../logic/drive/dual_speed_pid.c ../logic/drive/right_speed_model.c
             ../logic/drive/motor_control.c ../logic/drive/encoder.c ../logic/drive/encoder_math.c
+            ../logic/system/system_state.c
             src/encoder_shell.c)
-        target_include_directories(app PRIVATE ../logic/drive)
+        target_include_directories(app PRIVATE ../logic/drive ../logic/system)
         # User observed negative right RPM while physically driving forward: invert feedback only.
         target_compile_definitions(app PRIVATE LAB2_WHEEL_DUAL_DRIVE=1 MOTOR_TIMING_WHEEL=LEFT_MOTOR
             ENCODER_RIGHT_DEFAULT_SIGN=-1)

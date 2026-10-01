@@ -11,7 +11,7 @@ static struct dual_drive_status state;
 static struct dual_pid controller;
 static bool ready,arm_ready,ever_armed,brake_input,was_moving;
 static int throttle;
-static int64_t boost_until,last_update,last_command;
+static int64_t boost_until,last_update;
 
 static int outputs(direction_t direction,uint16_t duty)
 {
@@ -33,10 +33,6 @@ static int pause_locked(enum dual_reason reason)
     state.reason=reason;state.armed=false;arm_ready=false;
     (void)stop_locked(ever_armed);return -EIO;
 }
-static int link_stop_locked(void)
-{
-    return pause_locked(DUAL_LINK);
-}
 static void feedback_locked(const struct encoder_snapshot *sample)
 {
     state.left_mrpm=sample->wheel[ENCODER_LEFT].rpm_milli;
@@ -46,7 +42,7 @@ static void feedback_locked(const struct encoder_snapshot *sample)
 static int update_locked(void)
 {
     int64_t now=k_uptime_get();
-    if(now-last_command>=60)return link_stop_locked();
+    /* UART freshness belongs to pi_link; only its confirmed error callback stops us. */
     if(brake_input)return stop_locked(true); /* Brake beats throttle and startup assist. */
     state.target_mrpm=right_target_mrpm(throttle);
     if(!state.target_mrpm)return stop_locked(false);
@@ -103,7 +99,7 @@ int dual_drive_command(int32_t throttle_raw,int32_t brake_raw,bool enable)
     int t=right_pedal_permille(throttle_raw),b=right_pedal_permille(brake_raw),rc=0;
     if(!ready){rc=-EACCES;goto done;}
     if(t<0 || b<0){rc=pause_locked(DUAL_INPUT);goto done;}
-    last_command=k_uptime_get();throttle=t;brake_input=b>20;
+    throttle=t;brake_input=b>20;
     if(!enable){
         bool needs_stop=state.armed || state.duty_percent || state.fault || (ever_armed && !state.braking);
         state.armed=false;arm_ready=true;
@@ -125,10 +121,10 @@ void dual_drive_fail_safe(void)
 {
     k_mutex_lock(&drive_lock,K_FOREVER);
     if(ready){
-        bool needs_stop=state.armed || state.duty_percent || (ever_armed && !state.braking);
+        bool needs_stop=state.armed || state.duty_percent || state.fault || !state.braking;
         state.armed=false;arm_ready=false;
-        if(!state.fault && ever_armed)state.reason=DUAL_LINK;
-        if(needs_stop)(void)stop_locked(ever_armed);
+        /* Preserve the drive reason; the system state records why this stop was requested. */
+        if(needs_stop)(void)stop_locked(true); /* Startup/error must brake even before first arm. */
     }
     k_mutex_unlock(&drive_lock);
 }

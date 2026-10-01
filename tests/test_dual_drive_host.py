@@ -65,7 +65,10 @@ int main(void){
         assert(dual_drive_command(50000,65535,true)==0);
     }
     assert(!state.boosting);
-    fake_ms=last_command+60;assert(update_locked()!=0&&state.reason==DUAL_LINK&&!state.armed&&!state.fault);both(STOP);
+    fake_ms+=60;assert(update_locked()==0&&state.armed);both(FORWARD);
+    /* The communication owner alone requests the stop after confirmed expiry. */
+    state.reason=DUAL_ENCODER_LEFT;dual_drive_fail_safe();
+    assert(!state.armed&&!state.fault&&state.reason==DUAL_ENCODER_LEFT);both(STOP);
     assert(dual_drive_command(65535,65535,true)==0&&!state.armed);
     arm();assert(state.armed&&!state.fault);
     setup();arm();assert(dual_drive_command(0,65535,true)==0);dual_drive_fail_safe();both(STOP);
