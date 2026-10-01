@@ -8,6 +8,12 @@ Proposed shared pinout for **one NUCLEO-F401RE / STM32F401RET6**. Checked agains
 
 Left/right are viewed from the car's forward-facing direction. On 2026-09-30, the user identified bridge A as the physical right motor and bridge B as left. The logical motor mapping is corrected here; encoder wiring/signs are unchanged.
 
+Both motor directions were subsequently reversed in software: forward is
+IN1=LOW, IN2=HIGH; backward is IN1=HIGH, IN2=LOW. On the left this is
+PB14/PB15; on the right this is PB12/PB13.
+Encoder signs were not changed by these manual motor direction adjustments;
+verify positive encoder RPM in the intended forward direction before closed-loop use.
+
 | Signal | STM32 pin | Board header | Peripheral / role |
 |---|---|---|---|
 | MOTOR_L_PWM → driver ENB | PA7 | CN10-15 (D11) | TIM3_CH2, AF2 |
@@ -70,14 +76,14 @@ If the team already has a **3.3 V USB-to-TTL adapter**, it can instead connect a
 | 5 | CMD_RX | STM32 PC10 / CN7-1 |
 | 6 | PWM_SET | STM32 PC11 / CN7-2 |
 | 7 | PWM_OUT | Tap left motor PWM, PA7 / CN10-15 |
-| 8 | DIR_A | Tap left motor IN1, PB14 / CN10-28 |
+| 8 | DIR_A | Tap left motor IN2, PB15 / CN10-26 |
 | 9 | SRV | Tap PA8 / CN10-23 |
 | 10 | FL | Tap PC6 / CN10-4 |
 | 11 | FR | Tap PC7 / CN10-19 |
 | 12 | RL | Tap PC8 / CN10-2 |
 | 13 | RR | Tap PC9 / CN10-1 |
 
-One signal per connected breadboard row, in the handout's order. The four software markers are implemented in the running Python/STM32 bench path. PWM_OUT taps the left motor (PA7), and PWM_SET marks its final requested duty write. With LOW/LOW dynamic braking and EN HIGH, DIR_A taps PB14: it changes from HIGH in forward drive to LOW in braking; PB15 stays LOW. For reverse-to-brake tests, PB15 is the changing input instead.
+One signal per connected breadboard row, in the handout's order. The four software markers are implemented in the running Python/STM32 bench path. PWM_OUT taps the left motor (PA7), and PWM_SET marks its final requested duty write. With the reversed left direction and LOW/LOW dynamic braking, DIR_A taps PB15: HIGH in forward drive, LOW in braking. For reverse-to-brake tests, PB14 is the changing input instead.
 
 ## Devicetree changes required
 

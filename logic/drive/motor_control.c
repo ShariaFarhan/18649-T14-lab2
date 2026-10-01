@@ -126,9 +126,10 @@ int sys_motor_set(motor_mapping_t motor, uint32_t duty_cycle, direction_t direct
     }
     else if (direction == FORWARD) {
         /* Forward state (with left/right motor inversion logic preserved from your file)[cite: 6] */
-        rc = gpio_pin_set_dt(&m->in1, 1); //[cite: 6]
+        /* Both bridges use IN1=LOW, IN2=HIGH for forward. */
+        rc = gpio_pin_set_dt(&m->in1, 0); //[cite: 6]
         if (rc != 0) return rc;
-        rc = gpio_pin_set_dt(&m->in2, 0);
+        rc = gpio_pin_set_dt(&m->in2, 1);
         if (rc != 0) return rc;
         // if (motor == LEFT_MOTOR) {
         //     gpio_pin_set_dt(&m->in1, 0); //[cite: 6]
@@ -140,9 +141,9 @@ int sys_motor_set(motor_mapping_t motor, uint32_t duty_cycle, direction_t direct
     }
     else if (direction == BACKWARD) {
         /* Backward state[cite: 6] */
-        rc = gpio_pin_set_dt(&m->in1, 0); //[cite: 6]
+        rc = gpio_pin_set_dt(&m->in1, 1 ); //[cite: 6]
         if (rc != 0) return rc;
-        rc = gpio_pin_set_dt(&m->in2, 1); //[cite: 6]
+        rc = gpio_pin_set_dt(&m->in2, 0 ); //[cite: 6]
         if (rc != 0) return rc;
         // if (motor == LEFT_MOTOR) {
         //     gpio_pin_set_dt(&m->in1, 1); //[cite: 6]
