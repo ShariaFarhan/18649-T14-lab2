@@ -1,6 +1,5 @@
 /* One PID regulates signed mean RPM, applying the same PWM to both bridges. */
 #include "dual_drive.h"
-#include "right_speed_model.h" /* Right-wheel measured feedforward is an initial estimate only. */
 #include "dual_speed_pid.h"
 #include "motor_control.h"
 #include "encoder.h"
@@ -44,7 +43,7 @@ static int update_locked(void)
     int64_t now=k_uptime_get();
     /* UART freshness belongs to pi_link; only its confirmed error callback stops us. */
     if(brake_input)return stop_locked(true); /* Brake beats throttle and startup assist. */
-    state.target_mrpm=right_target_mrpm(throttle);
+    state.target_mrpm=target_mrpm(throttle);
     if(!state.target_mrpm)return stop_locked(false);
     struct encoder_snapshot sample;
     if(encoders_get(&sample))return pause_locked(DUAL_ENCODER_LEFT);
@@ -53,15 +52,15 @@ static int update_locked(void)
     feedback_locked(&sample);
     if(!was_moving){
         dual_pid_reset(&controller);last_update=now;
-        boost_until=now+(state.actual_mrpm<5000?RIGHT_START_DURATION_MS:0);
+        boost_until=now+(state.actual_mrpm<5000?DUAL_START_DURATION_MS:0);
         was_moving=true;
     }
     if(now-last_update>250)return pause_locked(DUAL_SCHEDULING);
     uint16_t permille;
     state.boosting=now<boost_until && state.actual_mrpm<state.target_mrpm;
     if(state.boosting){
-        permille=right_feedforward(state.target_mrpm);
-        if(permille<RIGHT_START_DUTY_PERCENT*10)permille=RIGHT_START_DUTY_PERCENT*10;
+        permille=feedforward(state.target_mrpm);
+        if(permille<DUAL_START_DUTY_PERCENT*10)permille=DUAL_START_DUTY_PERCENT*10;
     }else{
         boost_until=0;
         if(dual_pid_update(&controller,state.target_mrpm,state.actual_mrpm,
@@ -96,7 +95,9 @@ int dual_drive_init(void)
 int dual_drive_command(int32_t throttle_raw,int32_t brake_raw,bool enable)
 {
     k_mutex_lock(&drive_lock,K_FOREVER);
-    int t=right_pedal_permille(throttle_raw),b=right_pedal_permille(brake_raw),rc=0;
+    int t=pedal_permille(throttle_raw);
+    int b=pedal_permille(brake_raw);
+    int rc=0;
     if(!ready){rc=-EACCES;goto done;}
     if(t<0 || b<0){rc=pause_locked(DUAL_INPUT);goto done;}
     throttle=t;brake_input=b>20;
