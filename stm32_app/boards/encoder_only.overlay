@@ -1,0 +1,6 @@
+/* Keep actuator PWM pins unassigned. Encoder supplies remain external. */
+&pwm1 { status = "disabled"; };
+&pwm3 { status = "disabled"; };
+&timers1 { status = "disabled"; };
+&timers3 { status = "disabled"; };
+&usart1 { status = "disabled"; };
