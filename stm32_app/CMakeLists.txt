@@ -40,7 +40,7 @@ if(LAB2_WHEEL_STEERING)
     target_sources(app PRIVATE
         ../logic/steering/servo.c ../logic/steering/wheel_mapping.c
         ../logic/steering/wheel_buttons.c ../logic/blinkers/blinkers.c
-        ../logic/comms/pi_link.c ../logic/comms/link_parser.c)
+        ../logic/comms/pi_link.c)
     target_include_directories(app PRIVATE ../logic/steering ../logic/comms ../logic/blinkers)
     target_compile_definitions(app PRIVATE LAB2_RAW_WHEEL_LINK=1
         SERVO_PULSE_LEFT_US=1000U SERVO_PULSE_RIGHT_US=2000U)
@@ -84,7 +84,6 @@ elseif(LAB2_UART_PWM_BENCH)
         ../logic/drive/motor_control.c
         ../logic/drive/brake.c
         ../logic/comms/pi_link.c
-        ../logic/comms/link_parser.c
     )
     target_include_directories(app PRIVATE ../logic/drive ../logic/comms ../logic/steering ../logic/blinkers ../logic/system)
     target_compile_definitions(app PRIVATE LINK_TIMEOUT_MS=60)
@@ -122,7 +121,6 @@ if(LAB2_UART_DIAGNOSTIC)
     target_sources(app PRIVATE
         src/link_diagnostic.c
         ../logic/comms/pi_link.c
-        ../logic/comms/link_parser.c
     )
     target_include_directories(app PRIVATE ../logic/comms)
     target_compile_definitions(app PRIVATE LAB2_UART_DIAGNOSTIC=1)
