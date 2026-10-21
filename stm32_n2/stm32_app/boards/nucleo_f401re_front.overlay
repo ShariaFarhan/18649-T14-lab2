@@ -3,3 +3,109 @@
 #include <zephyr/dt-bindings/adc/adc.h>
 
 /*** FRONT - STEERING STM32 - NODE 2 ***/
+
+/ {
+	aliases {
+    /* CAN Aliases */
+    can-a = &can0;
+    can-b = &can1;
+
+    /* Steering Wheel Alias */
+		steering-servo = &steering_servo;
+
+    /* Front Blinker Aliases */
+		blinker-fl = &blinker_fl;
+		blinker-fr = &blinker_fr;
+	};
+
+	servo_pwms {
+		compatible = "pwm-leds";
+
+		steering_servo: steering-servo { pwms = <&pwm1 1 PWM_MSEC(20) PWM_POLARITY_NORMAL>; };
+	};
+
+	blinker_outputs {
+		compatible = "gpio-leds";
+
+		blinker_fl: blinker-fl { gpios = <&gpioc 8 GPIO_ACTIVE_HIGH>; };
+		blinker_fr: blinker-fr { gpios = <&gpioc 9 GPIO_ACTIVE_HIGH>; };
+	};
+
+	zephyr,user {
+    /* ACS712 current sensor divider output: servo PC4 */
+		io-channels = <&adc1 14>;
+		io-channel-names = "servo-current";
+
+    /* Scope markers for timing measurements */
+    can-rx-test-gpios  = <&gpioc 10 GPIO_ACTIVE_HIGH>; /* Toggles on CAN frame reception */
+	};
+};
+
+/* Disable I2C3: PA8 is the board's default I2C3 SCL pin, release it for TIM1_CH1. */
+&i2c3 { status = "disabled"; };
+
+/* Dual MCP2515 CAN Controllers on SPI1 */
+&spi1 {
+  status = "okay";
+  /* cs-gpios idx 0 = CAN A (PC6), idx 1 = CAN B (PC7) */
+  cs-gpios = <&gpioc 6 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,  
+             <&gpioc 7 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+
+  can0: mcp2515@0 {
+    compatible = "microchip,mcp2515";
+    reg = <0>;                                  /* Index 0 in cs-gpios */
+    spi-max-frequency = <10000000>;             /* 10 MHz max SPI speed */
+    osc-freq = <16000000>;                      /* Given */
+    bitrate = <500000>;                         /* CAN bitrate 500 kbit/s */
+    int-gpios = <&gpioa 10 GPIO_ACTIVE_LOW>;  /* PA10 for CAN A interupt pin */
+    status = "okay";
+    label = "can0";
+  };
+
+  can1: mcp2515@1 {
+    compatible = "microchip,mcp2515";
+    reg = <1>;                                  /* Index 1 in cs-gpios */
+    spi-max-frequency = <10000000>;             /* 10 MHz max SPI speed */
+    osc-freq = <16000000>;                      /* Given */
+    bitrate = <500000>;                         /* CAN bitrate 500 kbit/s */
+    int-gpios = <&gpiob 5 GPIO_ACTIVE_LOW>;   /* PB5 for CAN B interupt pin */
+    status = "okay";
+    label = "can1";
+  };
+
+};
+
+/* PWM1: Steering Servo (PA8/TIM1_CH1) */
+&timers1 {
+	/* 84 MHz / (83 + 1) = 1 MHz, giving 1 us PWM resolution. */
+	st,prescaler = <83>;
+	status = "okay";
+
+	pwm1: pwm {
+		pinctrl-0 = <&tim1_ch1_pa8>;
+		pinctrl-names = "default";
+		status = "okay";
+	};
+};
+
+/* Disable USART1 (Pi link), replacing with CAN */
+&usart1 { status = "disabled"; };
+
+/* ADC1: Steering Servo ACS712 Current Sensor (PC4/IN14) */
+&adc1 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	pinctrl-0 = <&adc1_in14_pc4>;
+	pinctrl-names = "default";
+	status = "okay";
+
+  /* Steering Servo Current Sensor (PC4) */
+	channel@e {
+		reg = <14>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_MAX>;
+		zephyr,resolution = <12>;
+	};
+};
+
