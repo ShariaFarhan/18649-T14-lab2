@@ -63,20 +63,20 @@
 #define BAD_INPUT_STEERING  32767 // out of range 
 
 //blinker self-cancel
-#define BLINK_TURN_THRESHOLD    (FW_STEER_RIGHT//35 / 100)
-#define BLINK_RETURN_THRESHOLD  (FW_STEER_RIGHT//10 / 100)
+#define BLINK_TURN_THRESHOLD    (FW_STEER_RIGHT * 35 / 100)
+#define BLINK_RETURN_THRESHOLD  (FW_STEER_RIGHT * 10 / 100)
 
 //noise threshold
 #define CAL_TOLERANCE_PERCENT 2
 
 // Deadlines in seconds
-#define UDP_TIMEOUT_S       0.100 // no wheel packet for this long  -> STALE, and
-                                     the cockpit stops its heartbeat (Lab 1)  
+#define UDP_TIMEOUT_S       0.100 /* no wheel packet for this long  -> STALE, and
+                                     the cockpit stops its heartbeat (Lab 1)  */
 #define FEEDBACK_TIMEOUT_S  0.060 // 3 missed CAN heartbeats (R4.5)           
-#define COMMAND_PERIOD_S    0.040 // CTRL resent if no wheel packet for this
+#define COMMAND_PERIOD_S    0.040 /* CTRL resent if no wheel packet for this
                                      long (R4.4: at least every 50 ms). Lab 2
                                      also sent on a fixed 20 ms grid, which on
-                                     CAN doubled the CTRL rate.               
+                                     CAN doubled the CTRL rate.  */             
 #define HB_PERIOD_S         0.020 // HB_N1 on both buses (R4.5)               
 #define FORCE_PERIOD_S      0.050 // force byte to the proxy (R2.3)           
 #define MONITOR_PERIOD_S    0.005 // heartbeat / bus-health check (Lab 3)     
