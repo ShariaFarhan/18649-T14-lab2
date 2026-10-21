@@ -1,0 +1,175 @@
+#include <zephyr/dt-bindings/pwm/pwm.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/adc/adc.h>
+
+/*** BACK - DRIVETRAIN STM32 - NODE 3 ***/
+
+/ {
+  aliases {
+    /* CAN Aliases */
+    can-a = &can0;
+    can-b = &can1;
+
+    /* Rear Blinker Aliases */
+    blinker-rl = &blinker_rl;
+    blinker-rr = &blinker_rr;
+    
+    /* Motor Speed PWM Aliases */
+    motor-left-pwm  = &motor_l_pwm;
+    motor-right-pwm = &motor_r_pwm;
+
+    /* Motor Direction GPIO Aliases */
+    motor-left-in1  = &motor_l_in1;
+    motor-left-in2  = &motor_l_in2;
+    motor-right-in1 = &motor_r_in1;
+    motor-right-in2 = &motor_r_in2;
+
+    /* Encoder Aliases */
+    encoder-left = &encoder_left;
+    encoder-right = &encoder_right;
+  };
+
+  pwmleds { status = "disabled"; };
+
+  blinker_outputs {
+    compatible = "gpio-leds";
+
+    blinker_rl: blinker-rl { gpios = <&gpioc 8 GPIO_ACTIVE_HIGH>; };
+    blinker_rr: blinker-rr { gpios = <&gpioc 9 GPIO_ACTIVE_HIGH>; };
+  };
+
+  motor_pwms {
+    compatible = "pwm-leds";
+
+    motor_l_pwm: motor_l_pwm { pwms = <&pwm3 2 PWM_KHZ(20) PWM_POLARITY_NORMAL>; };
+    motor_r_pwm: motor_r_pwm { pwms = <&pwm3 1 PWM_KHZ(20) PWM_POLARITY_NORMAL>; };
+  };
+
+  motor_direction {
+    compatible = "gpio-leds";
+
+    /* Physical left wheel: bridge B (PB14, PB15). */
+    motor_l_in1: motor_l_in1 { gpios = <&gpiob 14 GPIO_ACTIVE_HIGH>; };
+    motor_l_in2: motor_l_in2 { gpios = <&gpiob 15 GPIO_ACTIVE_HIGH>; };
+
+    /* Physical right wheel: bridge A (PB12, PB13). */
+    motor_r_in1: motor_r_in1 { gpios = <&gpiob 12 GPIO_ACTIVE_HIGH>; };
+    motor_r_in2: motor_r_in2 { gpios = <&gpiob 13 GPIO_ACTIVE_HIGH>; };
+  };
+
+  zephyr,user {
+    /* ACS712 current sensor divider outputs: left PC2, right PC3 */
+    io-channels = <&adc1 12>, <&adc1 13>;
+    io-channel-names = "left-motor-current", "right-motor-current";
+
+    /* Scope markers for timing measurements */
+    pwm-set-test-gpios = <&gpioc 11 GPIO_ACTIVE_HIGH>; /* Toggles on motor PWM update */
+    can-rx-test-gpios  = <&gpioc 10 GPIO_ACTIVE_HIGH>; /* Toggles on CAN frame reception */
+  };
+
+};
+
+/* Dual MCP2515 CAN Controllers on SPI1 */
+&spi1 {
+  status = "okay";
+  /* cs-gpios idx 0 = CAN A (PC6), idx 1 = CAN B (PC7) */
+  cs-gpios = <&gpioc 6 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,  
+             <&gpioc 7 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+
+  can0: mcp2515@0 {
+    compatible = "microchip,mcp2515";
+    reg = <0>;                                  /* Index 0 in cs-gpios */
+    spi-max-frequency = <10000000>;             /* 10 MHz max SPI speed */
+    osc-freq = <16000000>;                      /* Given */
+    bitrate = <500000>;                         /* CAN bitrate 500 kbit/s */
+    int-gpios = <&gpioa 10 GPIO_ACTIVE_LOW>;  /* PA10 for CAN A interupt pin */
+    status = "okay";
+    label = "can0";
+  };
+
+  can1: mcp2515@1 {
+    compatible = "microchip,mcp2515";
+    reg = <1>;                                  /* Index 1 in cs-gpios */
+    spi-max-frequency = <10000000>;             /* 10 MHz max SPI speed */
+    osc-freq = <16000000>;                      /* Given */
+    bitrate = <500000>;                         /* CAN bitrate 500 kbit/s */
+    int-gpios = <&gpiob 5 GPIO_ACTIVE_LOW>;   /* PB5 for CAN B interupt pin */
+    status = "okay";
+    label = "can1";
+  };
+
+};
+
+/* PWM3: Drive Motors (PA6/TIM3_CH1 & PA7/TIM3_CH2 at 20 kHz) */
+&timers3 {
+  status = "okay";
+
+  pwm3: pwm {
+    status = "okay";
+    pinctrl-0 = <&tim3_ch1_pa6 &tim3_ch2_pa7>;
+    pinctrl-names = "default";
+  };
+};
+
+/* Default board drivers otherwise claim encoder and motor pins. */
+&pwm2 { status = "disabled"; };
+&spi2 { status = "disabled"; };
+
+/* Left Encoder (PA0/TIM2_CH1 & PA1/TIM2_CH2) */
+&timers2 {
+  status = "okay";
+  st,prescaler = <0>;
+  encoder_left: qdec {
+    status = "okay";
+    pinctrl-0 = <&tim2_ch1_pa0 &tim2_ch2_pa1>;
+    pinctrl-names = "default";
+    st,encoder-mode = <3>; /* Both A/B edges: x4. */
+    st,counts-per-revolution = <1320>;
+    st,input-filter-level = <3>;
+  };
+};
+
+/* Right Encoder (PB6/TIM4_CH1 & PB7/TIM4_CH2) */
+&timers4 {
+  status = "okay";
+  st,prescaler = <0>;
+  encoder_right: qdec {
+    status = "okay";
+    pinctrl-0 = <&tim4_ch1_pb6 &tim4_ch2_pb7>;
+    pinctrl-names = "default";
+    st,encoder-mode = <3>;
+    st,counts-per-revolution = <1320>;
+    st,input-filter-level = <3>;
+  };
+};
+
+/* Disable USART1 (Pi link), replacing with CAN */
+&usart1 { status = "disabled"; };
+
+/* ADC1: Left/Right Drive Motor ACS712 Current Sensors (PC2/IN12 & PC3/IN13) */
+&adc1 {
+  #address-cells = <1>;
+  #size-cells = <0>;
+  pinctrl-0 = <&adc1_in12_pc2 &adc1_in13_pc3>;
+  pinctrl-names = "default";
+  status = "okay";
+
+  /* Left Motor Current Sensor (PC2) */
+  channel@c {
+    reg = <12>;
+    zephyr,gain = "ADC_GAIN_1";
+    zephyr,reference = "ADC_REF_INTERNAL";
+    zephyr,acquisition-time = <ADC_ACQ_TIME_MAX>;
+    zephyr,resolution = <12>;
+  };
+
+  /* Right Motor Current Sensor (PC3) */
+  channel@d {
+    reg = <13>;
+    zephyr,gain = "ADC_GAIN_1";
+    zephyr,reference = "ADC_REF_INTERNAL";
+    zephyr,acquisition-time = <ADC_ACQ_TIME_MAX>;
+    zephyr,resolution = <12>;
+  };
+};
+
