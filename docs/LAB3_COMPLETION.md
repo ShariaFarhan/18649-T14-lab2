@@ -4,9 +4,7 @@ Based on remote main `7edeab6`, preserving the original servo, motor driver,
 PID algorithm and state-machine modules. The complete version, including the
 watchdog startup correction, was deployed on the team bench on 2026-10-22.
 For setup and testing on another machine, start with LAB3_TESTING_TUTORIAL.md.
-See the review record for the independent review outcome and subsequent fix.
-Independent xhigh re-review: **software PASS**, documented in LAB3_REVIEW.md.
-Hardware verification remains pending.
+The code passed independent review; hardware timing verification remains pending.
 
 ## What is implemented
 
@@ -15,7 +13,8 @@ Hardware verification remains pending.
   progress. Source-specific FAULT sequences avoid aliasing different nodes.
 - N2 relay thread, original ID/bytes/sequence, cross-bus duplicate suppression,
   bounded pending software copies and no relay on N1/N3. Real hop timing still
-  needs measurement; see LAB3_RELAY.md for the topology and queue limitations.
+  needs measurement. Pending relay work expires after 20 ms; already queued
+  hardware transmissions are handled by controller recovery.
 - Front 50 Hz SRV and split synchronized lamps; Rear original motor driver
   with independent DRIVE and 10 ms PID tasks. Brake overrides throttle.
 - Board USER button on each Nucleo: leading-edge debounce 50 ms; first press

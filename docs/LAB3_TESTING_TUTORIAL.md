@@ -448,5 +448,5 @@ because CAN is disconnected or USER self-test is active.
 
 Stop the Windows sender with Ctrl-C to exercise input loss. Stop the Pi cockpit
 with Ctrl-C for a clean shutdown. Keep real actuator power off while rewiring,
-flashing, or testing fault injection. See [LAB3_REVIEW.md](LAB3_REVIEW.md) for
-the review scope and [LAB3_COMPLETION.md](LAB3_COMPLETION.md) for implementation details.
+flashing, or testing fault injection. See [LAB3_COMPLETION.md](LAB3_COMPLETION.md)
+for implementation details.
