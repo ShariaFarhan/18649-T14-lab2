@@ -1,4 +1,19 @@
-# 18-449/649 Team 14 Lab 2
+# 18-449/649 Team 14 Lab 3: Dual CAN
+
+**Start here: [Lab 3 wiring, running, and testing tutorial](docs/LAB3_TESTING_TUTORIAL.md).**
+
+Branch `codex/lab3-complete-test-guide` contains the integrated dual-CAN demo:
+relay, USER self-test, watchdog, FORCE telemetry, steering and PID bench outputs.
+Implementation details are in [LAB3_COMPLETION.md](docs/LAB3_COMPLETION.md);
+review and the subsequent watchdog-startup correction are recorded in
+[LAB3_REVIEW.md](docs/LAB3_REVIEW.md). PID feedback is simulated; hardware
+timing/checkoff evidence is still required. Earlier stage records remain in
+[LAB3_CTRL_BLINK.md](docs/LAB3_CTRL_BLINK.md) and [LAB3_RELAY.md](docs/LAB3_RELAY.md).
+
+## Legacy Lab 2 UART application
+
+The instructions below describe the older Lab 2 application, not the Lab 3
+CAN program or its current pin assignments.
 
 This repository contains the integrated vehicle-control path:
 

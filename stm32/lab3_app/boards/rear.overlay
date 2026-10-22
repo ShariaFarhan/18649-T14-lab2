@@ -1,0 +1,49 @@
+#include <zephyr/dt-bindings/pwm/pwm.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+/ {
+    aliases {
+        /delete-property/ blinker-fl;
+        /delete-property/ blinker-fr;
+        blinker-rl = &turn_left;
+        blinker-rr = &turn_right;
+        motor-left-pwm = &motor_left_pwm;
+        motor-right-pwm = &motor_right_pwm;
+        motor-left-in1 = &motor_left_in1;
+        motor-left-in2 = &motor_left_in2;
+        motor-right-in1 = &motor_right_in1;
+        motor-right-in2 = &motor_right_in2;
+    };
+    motor_pwms {
+        compatible = "pwm-leds";
+        motor_left_pwm: left { pwms = <&pwm2 3 PWM_KHZ(20) PWM_POLARITY_NORMAL>; }; /* D6 */
+        motor_right_pwm: right { pwms = <&pwm1 1 PWM_KHZ(20) PWM_POLARITY_NORMAL>; }; /* D7 */
+    };
+    motor_direction {
+        compatible = "gpio-leds";
+        motor_left_in1: left-in1 { gpios = <&gpioa 0 GPIO_ACTIVE_HIGH>; }; /* A0 */
+        motor_left_in2: left-in2 { gpios = <&gpioa 1 GPIO_ACTIVE_HIGH>; }; /* A1 */
+        motor_right_in1: right-in1 { gpios = <&gpioa 4 GPIO_ACTIVE_HIGH>; }; /* A2 */
+        motor_right_in2: right-in2 { gpios = <&gpiob 0 GPIO_ACTIVE_HIGH>; }; /* A3 */
+    };
+    zephyr,user {
+        cmd-rx-test-gpios = <&gpioc 1 GPIO_ACTIVE_HIGH>; /* A4: accepted CTRL */
+        pwm-set-test-gpios = <&gpioa 9 GPIO_ACTIVE_HIGH>; /* D8: final left PWM write */
+    };
+};
+
+/* PA6/PA7 stay on SPI1. USART2 console PA2/PA3 remains untouched. */
+&timers2 { status = "okay"; st,prescaler = <0>; };
+&pwm2 {
+    status = "okay";
+    pinctrl-0 = <&tim2_ch3_pb10>; /* D6 */
+    pinctrl-names = "default";
+};
+&timers1 {
+    status = "okay";
+    st,prescaler = <0>;
+    pwm1: pwm {
+        status = "okay";
+        pinctrl-0 = <&tim1_ch1_pa8>; /* D7, Rear only */
+        pinctrl-names = "default";
+    };
+};

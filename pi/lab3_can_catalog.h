@@ -80,7 +80,7 @@ static inline uint8_t can_crc8(const uint8_t *data, size_t len)
 #define FAULT_REASON        2       /* FAULT_R_*                                */
 #define FAULT_R_SELF_TEST   1u      /* test button single press                 */
 #define FAULT_R_BAD_INPUT   2u      /* out-of-range or CRC-bad CTRL             */
-#define FAULT_R_UDP_LOST    3u      /* cockpit: no UDP for 100 ms               */
+#define FAULT_R_UDP_LOST    3u      /* cockpit: configured UDP timeout expired */
 #define FAULT_R_ZONE_LOST   4u      /* 3 heartbeats missed on both buses        */
 #define FAULT_R_ISOLATED    5u      /* node hears nobody on either bus          */
 #define FAULT_R_OUTPUT      6u      /* actuator / driver failure                */

@@ -1,0 +1,15 @@
+case,start_signal,end_signal,target_ms,measured_max_ms,p99_ms,evidence,status
+Pi idle >=60s,Pi UDP_RX,Pi CMD_TX,,,,,pending
+Pi stressed >=60s,Pi UDP_RX,Pi CMD_TX,,,,,pending
+Direct brake,Pi UDP_RX,Rear DIR_A,2,,,,pending
+Relay brake,Pi UDP_RX via Front RELAY_TX,Rear DIR_A,2,,,,pending analysis verdict allowed
+Steering,Pi UDP_RX,Front SRV,50,,,,pending
+Blink start,Pi UDP_RX,FL or FR,100,,,,pending
+Front rear sync >=10 edges,FL,RL,1,,,,pending
+Local USER fail,USER edge,local ERR,10,,,,pending
+System error after USER,USER edge,remote ERR/brake,100,,,,pending
+DEG on,branch disconnected,DEG high,60,,,,pending
+DEG clear,branch restored,DEG low,100,,,,pending
+Full node isolation,second branch disconnected,remote ERR,100,,,,pending
+Restore isolation,branches restored,NORMAL ERR low,500,,,,pending
+Watchdog reset,worker stopped,reset indication,,,,,pending

@@ -1,0 +1,27 @@
+#include <zephyr/dt-bindings/pwm/pwm.h>
+
+/ {
+    aliases { steering-servo = &steering_servo; relay-tx = &relay_tx; };
+    relay_marker {
+        compatible = "gpio-leds";
+        relay_tx: relay-tx { gpios = <&gpiob 10 GPIO_ACTIVE_HIGH>; }; /* D6 */
+    };
+    servo_pwms {
+        compatible = "pwm-leds";
+        steering_servo: steering-servo {
+            pwms = <&pwm1 1 PWM_MSEC(20) PWM_POLARITY_NORMAL>;
+        };
+    };
+};
+
+/* Reuse the remote Lab2 servo assignment: Arduino D7 / PA8 / TIM1_CH1.
+ * I2C3 is disabled in the common overlay to release PA8. */
+&timers1 {
+    st,prescaler = <83>;
+    status = "okay";
+    pwm1: pwm {
+        pinctrl-0 = <&tim1_ch1_pa8>;
+        pinctrl-names = "default";
+        status = "okay";
+    };
+};

@@ -13,24 +13,22 @@
 #define BLINKER_RL_NODE DT_ALIAS(blinker_rl)
 #define BLINKER_RR_NODE DT_ALIAS(blinker_rr)
 
-#if !DT_NODE_HAS_STATUS(BLINKER_FL_NODE, okay) || \
-	!DT_NODE_HAS_STATUS(BLINKER_FR_NODE, okay) || \
-	!DT_NODE_HAS_STATUS(BLINKER_RL_NODE, okay) || \
-	!DT_NODE_HAS_STATUS(BLINKER_RR_NODE, okay)
-#error "Devicetree aliases blinker-fl/fr/rl/rr are required"
+#if (!DT_NODE_HAS_STATUS(BLINKER_FL_NODE, okay) && !DT_NODE_HAS_STATUS(BLINKER_RL_NODE, okay)) || \
+    (!DT_NODE_HAS_STATUS(BLINKER_FR_NODE, okay) && !DT_NODE_HAS_STATUS(BLINKER_RR_NODE, okay))
+#error "At least one left and one right blinker alias are required"
 #endif
 
 #define TURN_HALF_PERIOD_MS 500
 #define HAZARD_HALF_PERIOD_MS 250
 
 static const struct gpio_dt_spec front_left =
-	GPIO_DT_SPEC_GET(BLINKER_FL_NODE, gpios);
+	GPIO_DT_SPEC_GET_OR(BLINKER_FL_NODE, gpios, {0});
 static const struct gpio_dt_spec front_right =
-	GPIO_DT_SPEC_GET(BLINKER_FR_NODE, gpios);
+	GPIO_DT_SPEC_GET_OR(BLINKER_FR_NODE, gpios, {0});
 static const struct gpio_dt_spec rear_left =
-	GPIO_DT_SPEC_GET(BLINKER_RL_NODE, gpios);
+	GPIO_DT_SPEC_GET_OR(BLINKER_RL_NODE, gpios, {0});
 static const struct gpio_dt_spec rear_right =
-	GPIO_DT_SPEC_GET(BLINKER_RR_NODE, gpios);
+	GPIO_DT_SPEC_GET_OR(BLINKER_RR_NODE, gpios, {0});
 
 static struct k_spinlock state_lock;
 static enum blinker_mode current_mode = BLINKER_MODE_OFF;
@@ -39,6 +37,7 @@ static bool turn_crossed;
 static bool initialized;
 static int16_t last_steering;
 static int64_t next_edge_ms;
+static bool externally_clocked;
 
 static int apply_outputs(enum blinker_mode mode, bool on)
 {
@@ -46,16 +45,16 @@ static int apply_outputs(enum blinker_mode mode, bool on)
 		(mode == BLINKER_MODE_LEFT || mode == BLINKER_MODE_HAZARD);
 	const int right_on = on &&
 		(mode == BLINKER_MODE_RIGHT || mode == BLINKER_MODE_HAZARD);
-	int rc;
+	int rc = 0;
 
-	rc = gpio_pin_set_dt(&front_left, left_on);
-	if (rc == 0) {
+	if (front_left.port) rc = gpio_pin_set_dt(&front_left, left_on);
+	if (rc == 0 && rear_left.port) {
 		rc = gpio_pin_set_dt(&rear_left, left_on);
 	}
-	if (rc == 0) {
+	if (rc == 0 && front_right.port) {
 		rc = gpio_pin_set_dt(&front_right, right_on);
 	}
-	if (rc == 0) {
+	if (rc == 0 && rear_right.port) {
 		rc = gpio_pin_set_dt(&rear_right, right_on);
 	}
 
@@ -71,7 +70,7 @@ static void blink_work_handler(struct k_work *work)
 	ARG_UNUSED(work);
 
 	key = k_spin_lock(&state_lock);
-	if (!initialized || current_mode == BLINKER_MODE_OFF) {
+	if (!initialized || externally_clocked || current_mode == BLINKER_MODE_OFF) {
 		k_spin_unlock(&state_lock, key);
 		return;
 	}
@@ -104,6 +103,7 @@ K_TIMER_DEFINE(blink_timer, blink_timer_handler, NULL);
 
 static int configure_output(const struct gpio_dt_spec *output)
 {
+	if (!output->port) return 0; /* The other zone owns this lamp in Lab 3. */
 	if (!gpio_is_ready_dt(output)) {
 		return -ENODEV;
 	}
@@ -137,6 +137,7 @@ int blinkers_init(void)
 	phase_on = false;
 	turn_crossed = false;
 	last_steering = 0;
+	externally_clocked = false;
 	initialized = true;
 	k_spin_unlock(&state_lock, key);
 
@@ -165,6 +166,7 @@ int blinkers_set_mode(enum blinker_mode mode)
 
 	key = k_spin_lock(&state_lock);
 	current_mode = mode;
+	externally_clocked = false;
 	phase_on = mode != BLINKER_MODE_OFF;
 	turn_crossed = false;
 	half_period_ms = mode == BLINKER_MODE_HAZARD ?
@@ -187,6 +189,21 @@ int blinkers_set_error(bool error_active)
 {
 	return blinkers_set_mode(error_active ? BLINKER_MODE_HAZARD :
 					  BLINKER_MODE_OFF);
+}
+
+int blinkers_apply_phase(enum blinker_mode mode, bool on)
+{
+    if (mode < BLINKER_MODE_OFF || mode > BLINKER_MODE_HAZARD) return -EINVAL;
+    k_timer_stop(&blink_timer);
+    (void)k_work_cancel(&blink_work);
+    k_spinlock_key_t key = k_spin_lock(&state_lock);
+    if (!initialized) { k_spin_unlock(&state_lock,key); return -EACCES; }
+    externally_clocked = true;
+    current_mode = mode;
+    phase_on = on && mode != BLINKER_MODE_OFF;
+    int rc = apply_outputs(mode,phase_on);
+    k_spin_unlock(&state_lock,key);
+    return rc;
 }
 
 int blinkers_update_steering(int16_t steering_percent)

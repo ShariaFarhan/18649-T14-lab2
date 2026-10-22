@@ -1,0 +1,68 @@
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+    aliases {
+        can-a = &can_a; can-b = &can_b;
+        degraded-a = &degraded_a; degraded-b = &degraded_b;
+        blinker-fl = &turn_left; blinker-fr = &turn_right;
+        can-rx-a = &rx_a; can-rx-b = &rx_b;
+        can-tx-a = &tx_a; can-tx-b = &tx_b;
+        zone-err = &zone_err; task-exec = &task_exec;
+    };
+    scope_markers {
+        compatible = "gpio-leds";
+        rx_a: rx-a { gpios = <&gpioc 10 GPIO_ACTIVE_HIGH>; }; /* CN7 pin 1 */
+        rx_b: rx-b { gpios = <&gpioc 11 GPIO_ACTIVE_HIGH>; }; /* CN7 pin 2 */
+        tx_a: tx-a { gpios = <&gpioc 12 GPIO_ACTIVE_HIGH>; }; /* CN7 pin 3 */
+        tx_b: tx-b { gpios = <&gpiod 2 GPIO_ACTIVE_HIGH>; };  /* CN7 pin 4 */
+        zone_err: zone-err { gpios = <&gpioc 0 GPIO_ACTIVE_HIGH>; }; /* A5 */
+        task_exec: task-exec { gpios = <&gpioc 6 GPIO_ACTIVE_HIGH>; }; /* CN10 pin 4 */
+    };
+    degraded_leds {
+        compatible = "gpio-leds";
+        degraded_a: degraded-a { gpios = <&gpiob 3 GPIO_ACTIVE_HIGH>; }; /* Arduino D3 */
+        degraded_b: degraded-b { gpios = <&gpiob 4 GPIO_ACTIVE_HIGH>; }; /* Arduino D5 */
+    };
+    turn_outputs {
+        compatible = "gpio-leds";
+        turn_left: turn-left { gpios = <&gpiob 9 GPIO_ACTIVE_HIGH>; }; /* Arduino D14 */
+        turn_right: turn-right { gpios = <&gpiob 8 GPIO_ACTIVE_HIGH>; }; /* Arduino D15 */
+    };
+    leds { status = "disabled"; };
+    pwmleds { status = "disabled"; };
+};
+&green_led_2 { status = "disabled"; };
+&pwm2 { status = "disabled"; };
+/* Release PB6 from the default USART1 mapping, PA5 from LED/PWM. */
+&usart1 { status = "disabled"; };
+&spi2 { status = "disabled"; };
+&i2c1 { status = "disabled"; };
+&i2c3 { status = "disabled"; };
+&iwdg { status = "okay"; };
+&spi1 {
+    status = "okay";
+    pinctrl-0 = <&spi1_sck_pa5 &spi1_miso_pa6 &spi1_mosi_pa7>;
+    pinctrl-names = "default";
+    cs-gpios = <&gpiob 6 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,
+               <&gpioc 7 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+    can_a: mcp2515@0 {
+        compatible = "microchip,mcp2515";
+        reg = <0>;
+        spi-max-frequency = <1000000>;
+        osc-freq = <16000000>;
+        int-gpios = <&gpioa 10 GPIO_ACTIVE_LOW>;
+        bitrate = <500000>;
+        sample-point = <875>;
+        status = "okay";
+    };
+    can_b: mcp2515@1 {
+        compatible = "microchip,mcp2515";
+        reg = <1>;
+        spi-max-frequency = <1000000>;
+        osc-freq = <16000000>;
+        int-gpios = <&gpiob 5 GPIO_ACTIVE_LOW>;
+        bitrate = <500000>;
+        sample-point = <875>;
+        status = "okay";
+    };
+};

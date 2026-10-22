@@ -22,6 +22,8 @@ int blinkers_set_mode(enum blinker_mode mode);
 
 /* 2 Hz hazards; clearing it turns the blinkers off. */
 int blinkers_set_error(bool error_active);
+/* Lab 3: apply the cockpit's phase immediately; no local blink timer. */
+int blinkers_apply_phase(enum blinker_mode mode, bool on);
 
 /*
  * Feed the latest normalized steering value to the self-cancel state machine.

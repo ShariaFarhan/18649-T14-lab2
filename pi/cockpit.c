@@ -19,9 +19,12 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/un.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
+#include "../shared/lab3_can_rx.h"
 #include "lab3_can_catalog.h"  //for can bus and layout info 
 
 // ------------------------------ CONFIG ---------------------------------- 
@@ -70,8 +73,8 @@
 #define CAL_TOLERANCE_PERCENT 2
 
 // Deadlines in seconds
-#define UDP_TIMEOUT_S       0.100 /* no wheel packet for this long  -> STALE, and
-                                     the cockpit stops its heartbeat (Lab 1)  */
+#define UDP_TIMEOUT_S       0.250 /* Allow measured Wi-Fi stalls; beyond this -> STALE, and
+                                     the cockpit stops its heartbeat. */
 #define FEEDBACK_TIMEOUT_S  0.060 // 3 missed CAN heartbeats (R4.5)           
 #define COMMAND_PERIOD_S    0.040 /* CTRL resent if no wheel packet for this
                                      long (R4.4: at least every 50 ms). Lab 2
@@ -110,8 +113,9 @@
 #define TP_CAN_TX_B         3
 #define TP_DEG_A            4
 #define TP_DEG_B            5
-#define TP_COUNT            6
-static const unsigned TP_PIN[TP_COUNT] = { 23, 17, 27, 22, 5, 6 };
+#define TP_ERR              6
+#define TP_COUNT            7
+static const unsigned TP_PIN[TP_COUNT] = { 23, 17, 27, 22, 5, 6, 13 };
 
 // ------------------------- WIRE FORMATS --------------------------------- 
 
@@ -216,10 +220,12 @@ typedef struct {
     // FORCE (0x300) -> proxy 
     int8_t   force;
     bool     have_force;
+    double   force_at;
     struct sockaddr_in proxy;
     bool     have_proxy;
 } state_t;
 
+static struct lab3_can_rx rx_state;
 static volatile sig_atomic_t g_running = 1;
 
 static void on_signal(int sig) { (void)sig; g_running = 0; }
@@ -242,7 +248,7 @@ static uint32_t rd_u32le(const uint8_t *p)
 static double advance_deadline(double deadline, double now, double period)
 {
     if (now < deadline) return deadline;
-    return deadline + ((double)(long)((now - deadline) / period) + 1.0)//period;
+    return deadline + ((double)(long)((now - deadline) / period) + 1.0) * period;
 }
 
 static bool wheel_fresh(const state_t *s, double now)
@@ -252,12 +258,14 @@ static bool wheel_fresh(const state_t *s, double now)
 
 static bool heartbeat_fresh(const state_t *s, double now)
 {
-    return s->have_status && now - s->last_hb <= FEEDBACK_TIMEOUT_S;
+    return s->have_status && (lab3_hb_fresh(&rx_state,2,0,(uint64_t)(now*1000)) ||
+                             lab3_hb_fresh(&rx_state,2,1,(uint64_t)(now*1000)));
 }
 
 static bool n2_fresh(const state_t *s, double now)
 {
-    return s->have_n2 && now - s->n2_last_hb <= FEEDBACK_TIMEOUT_S;
+    return s->have_n2 && (lab3_hb_fresh(&rx_state,1,0,(uint64_t)(now*1000)) ||
+                         lab3_hb_fresh(&rx_state,1,1,(uint64_t)(now*1000)));
 }
 
 // --------------------------- AXIS CONVERSION ---------------------------- 
@@ -270,10 +278,10 @@ static int32_t map_axis(int32_t raw, int32_t in_a, int32_t in_b, int32_t out_a, 
     int64_t span = (int64_t)in_b - in_a;
     int64_t pos = (int64_t)raw - in_a;
     if (span < 0) { span = -span; pos = -pos; }
-    int64_t tolerance = span//CAL_TOLERANCE_PERCENT / 100;
+    int64_t tolerance = span * CAL_TOLERANCE_PERCENT / 100;
     if (pos < 0 && pos >= -tolerance) pos = 0;
     if (pos > span && pos <= span + tolerance) pos = span;
-    int64_t out = out_a + pos//((int64_t)out_b - out_a) / span;
+    int64_t out = out_a + pos * ((int64_t)out_b - out_a) / span;
     if (out > INT32_MAX) out = INT32_MAX;
     if (out < INT32_MIN) out = INT32_MIN;
     return (int32_t)out;
@@ -417,11 +425,14 @@ static int can_open(const char *ifname)
 // Hot/parallel transmit: the same frame on bus A and bus B, back to back.
 //A pulled jumper means no ACK, the TX queue fills and write() fails with
 //ENOBUFS. That bus is simply skipped; the other one keeps working. 
+static unsigned tx_queued[2], tx_failed[2];
 static void can_send_both(const int can_fd[2], test_points_t *tp, const struct can_frame *f)
 {
     for (int b = 0; b < 2; b++) {
-        test_points_toggle(tp, b == 0 ? TP_CAN_TX_A : TP_CAN_TX_B);
-        (void)!write(can_fd[b], f, sizeof(*f));
+        if (write(can_fd[b], f, sizeof(*f)) == (ssize_t)sizeof(*f)) {
+            ++tx_queued[b];test_points_toggle(tp,b==0 ? TP_CAN_TX_A : TP_CAN_TX_B);
+        }
+        else ++tx_failed[b];
     }
 }
 
@@ -456,8 +467,8 @@ static void build_command_frame(struct can_frame *f, const state_t *s, bool stal
     f->data[CTRL_CRC] = can_crc8(f->data, CTRL_CRC);
 }
 
-// HB_N1 (0x100): sent only while the wheel stream is fresh (Lab 1: no UDP
-//for 100 ms -> the cockpit counts as failed and stops its heartbeat) and the
+// HB_N1 (0x100): sent only while the wheel stream is fresh (no UDP
+//for 250 ms -> the cockpit counts as failed and stops its heartbeat) and the
 //cockpit has not been failed with the test button. 
 static void build_heartbeat_frame(struct can_frame *f, const state_t *s)
 {
@@ -466,6 +477,8 @@ static void build_heartbeat_frame(struct can_frame *f, const state_t *s)
     f->can_dlc = CAN_FRAME_DLC;
     f->data[CAN_B0] = can_byte0(s->hb_seq, s->error ? CAN_FLAG_SYS_ERROR : 0);
     f->data[HB_STATE] = s->error ? ZONE_STATE_SYS_ERROR : ZONE_STATE_NORMAL;
+    f->data[HB_REASON] = !s->error ? 0 : s->cockpit_failed ? 4 :
+                        !s->have_rx ? 1 : 2;
     f->data[HB_BUS] = (uint8_t)((s->degraded[0] ? HB_BUS_A_DEGRADED : 0) |
                                 (s->degraded[1] ? HB_BUS_B_DEGRADED : 0));
 }
@@ -582,7 +595,7 @@ static bool blinker_due(state_t *s, double now)
         double step = blink_step(s->blink_mode);
         long edges = 1 + (long)((now - s->blink_next_edge) / step);
         if (s->blink_mode != BLINK_MODE_OFF && (edges & 1)) s->blink_on = !s->blink_on;
-        s->blink_next_edge += (double)edges//step;
+        s->blink_next_edge += (double)edges * step;
         s->blink_pending = true;
     }
     return s->blink_pending && now - s->blink_last_tx >= BLINK_MIN_GAP_S;
@@ -659,12 +672,10 @@ static void heartbeat_decode(hb_payload_t *hb, const uint8_t *d)
 //Power-up is in error until HB_N2 and HB_N3 have been seen on either bus. 
 static void zone_state_update(state_t *s, double now)
 {
-    bool silent[2];
-    for (int b = 0; b < 2; b++)
-        silent[b] = !s->bus_have_rx[b] || now - s->bus_last_rx[b] > FEEDBACK_TIMEOUT_S;
-    s->isolated = silent[0] && silent[1];
-    s->degraded[0] = silent[0] && !silent[1];
-    s->degraded[1] = silent[1] && !silent[0];
+    struct lab3_health health=lab3_health_get(&rx_state,0,(uint64_t)(now*1000));
+    s->isolated=health.isolated;
+    s->degraded[0]=!!(health.degraded & HB_BUS_A_DEGRADED);
+    s->degraded[1]=!!(health.degraded & HB_BUS_B_DEGRADED);
 
     bool wheel_ok = wheel_fresh(s, now);
     bool n2 = n2_fresh(s, now), n3 = heartbeat_fresh(s, now);
@@ -775,6 +786,27 @@ static void print_status(const state_t *s, double now)
 }
 
 // ------------------------------- MAIN ----------------------------------- 
+static bool control_command(state_t *s,const char *command)
+{
+    if (!strcmp(command,"bad-input on")) s->bad_input=true;
+    else if (!strcmp(command,"bad-input off")) s->bad_input=false;
+    else return false;
+    return true;
+}
+static int control_open(const char *path)
+{
+    struct sockaddr_un a={.sun_family=AF_UNIX};
+    if (strlen(path)>=sizeof(a.sun_path)) { errno=ENAMETOOLONG;return -1; }
+    memcpy(a.sun_path,path,strlen(path)+1);
+    int fd=socket(AF_UNIX,SOCK_DGRAM|SOCK_NONBLOCK,0);
+    if (fd<0) return -1;
+    mode_t old=umask(0077);
+    int rc=bind(fd,(struct sockaddr *)&a,sizeof(a));
+    umask(old);
+    if (rc) { close(fd);return -1; } /* Never unlink another running socket. */
+    if (chmod(path,0600)) { int saved=errno;close(fd);unlink(path);errno=saved;return -1; }
+    return fd;
+}
 
 static void usage(const char *prog)
 {
@@ -790,8 +822,12 @@ static void usage(const char *prog)
         "  --btn-lsb N           raw button index for the left blinker (default %d)\n"
         "  --btn-rsb N           raw button index for the right blinker (default %d)\n"
         "  --btn-test N          raw button index for the self-test button (default %d)\n"
+        "  --heartbeat-only      stage 1: heartbeats/dedup only; no control, fault, blink or force output\n"
+        "  --ctrl-blink-only     CTRL and synchronized lights; no motor-enable or force-feedback request\n"
+        "  --lab3-demo           scope outputs plus dummy FORCE UDP telemetry (no motor-arm bit)\n"
+        "  --control-socket PATH local 0600 Unix socket for bad-input on/off\n"
         "  --quiet               no periodic status line\n"
-        "  --no-test-points      run without the test points / DEG LEDs (GPIO 23,17,27,22,5,6)\n",
+        "  --no-test-points      run without markers/DEG/ERR (GPIO 23,17,27,22,5,6,13)\n",
         prog, UDP_PORT, IN_STEER_LEFT, IN_STEER_CENTER, IN_STEER_RIGHT,
         IN_PEDAL_RELEASED, IN_PEDAL_PRESSED, IN_PEDAL_RELEASED, IN_PEDAL_PRESSED,
         RAW_BTN_LSB, RAW_BTN_RSB, RAW_BTN_TEST);
@@ -810,7 +846,9 @@ static bool calibration_ok(const calibration_t *c)
 int main(int argc, char **argv)
 {
     const char *can_if[2] = { "can0", "can1" }, *bind_ip = "0.0.0.0", *pc_ip = NULL;
-    bool use_test_points = true, quiet = false;
+    bool use_test_points = true, quiet = false, heartbeat_only = false, ctrl_blink_only = false;
+    bool demo_feedback=false;
+    const char *control_path=NULL;
     calibration_t cal = {
         IN_STEER_LEFT, IN_STEER_CENTER, IN_STEER_RIGHT,
         IN_PEDAL_RELEASED, IN_PEDAL_PRESSED, IN_PEDAL_RELEASED, IN_PEDAL_PRESSED,
@@ -828,6 +866,10 @@ int main(int argc, char **argv)
         { "btn-lsb", required_argument, NULL, 'L' },
         { "btn-rsb", required_argument, NULL, 'R' },
         { "btn-test", required_argument, NULL, 'T' },
+        { "heartbeat-only", no_argument, NULL, 'H' },
+        { "ctrl-blink-only", no_argument, NULL, 'C' },
+        { "lab3-demo", no_argument, NULL, 'D' },
+        { "control-socket", required_argument, NULL, 'U' },
         { "quiet", no_argument, NULL, 'q' },
         { "no-test-points", no_argument, NULL, 'n' },
         { "help", no_argument, NULL, 'h' },
@@ -835,7 +877,7 @@ int main(int argc, char **argv)
     };
     int opt;
     bool args_ok = true;
-    while ((opt = getopt_long(argc, argv, "A:B:b:p:s:t:k:L:R:T:qnh", options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "A:B:b:p:s:t:k:L:R:T:U:qnHCDh", options, NULL)) != -1) {
         switch (opt) {
         case 'A': can_if[0] = optarg; break;
         case 'B': can_if[1] = optarg; break;
@@ -847,6 +889,10 @@ int main(int argc, char **argv)
         case 'L': cal.btn_lsb = atoi(optarg); break;
         case 'R': cal.btn_rsb = atoi(optarg); break;
         case 'T': cal.btn_test = atoi(optarg); break;
+        case 'H': heartbeat_only = true; break;
+        case 'C': ctrl_blink_only = true; break;
+        case 'D': ctrl_blink_only=true;demo_feedback=true;break;
+        case 'U': control_path=optarg;break;
         case 'q': quiet = true; break;
         case 'n': use_test_points = false; break;
         default: usage(argv[0]); return opt == 'h' ? 0 : 2;
@@ -884,6 +930,7 @@ int main(int argc, char **argv)
         close(can_fd[1]);
         return 1;
     }
+    test_points_set(&tp,TP_ERR,true);
 
     int udp_fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0);
     struct sockaddr_in local;
@@ -899,9 +946,15 @@ int main(int argc, char **argv)
         if (udp_fd >= 0) close(udp_fd);
         return 1;
     }
+    int control_fd=control_path ? control_open(control_path) : -1;
+    if (control_path && control_fd<0) {
+        perror("control socket bind (remove only a confirmed stale socket)");
+        close(udp_fd);close(can_fd[0]);close(can_fd[1]);test_points_close(&tp);return 1;
+    }
 
     // Keyboard commands are read only when this program owns the terminal. 
-    bool stdin_open = !isatty(STDIN_FILENO) || tcgetpgrp(STDIN_FILENO) == getpgrp();
+    bool stdin_open = !heartbeat_only &&
+        (!isatty(STDIN_FILENO) || tcgetpgrp(STDIN_FILENO) == getpgrp());
 
     // Until the proxy sends something: centered, pedals released, and in the
     //error state (R3: every zone powers up in error). 
@@ -935,16 +988,22 @@ int main(int argc, char **argv)
         double wait = wake - now_s();
         if (wait < 0) wait = 0;
         if (wait > MONITOR_PERIOD_S) wait = MONITOR_PERIOD_S;   // Lab 3: heartbeat monitor tick 
-        struct timespec ts = { (time_t)wait, (long)((wait - (double)(time_t)wait)//1e9) };
-        struct pollfd fds[4] = {
+        struct timespec ts = { (time_t)wait, (long)((wait - (double)(time_t)wait) * 1e9) };
+        struct pollfd fds[5] = {
             { can_fd[0], POLLIN, 0 }, { udp_fd, POLLIN, 0 }, { stdin_open ? STDIN_FILENO : -1, POLLIN, 0 },
-            { can_fd[1], POLLIN, 0 }
+            { can_fd[1], POLLIN, 0 }, {control_fd,POLLIN,0}
         };
-        if (ppoll(fds, 4, &ts, NULL) < 0) {
+        if (ppoll(fds, 5, &ts, NULL) < 0) {
             if (errno == EINTR) continue;
             perror("ppoll");
             exit_code = 1;
             break;
+        }
+        if (control_fd>=0 && (fds[4].revents & POLLIN)) {
+            char command[64];ssize_t n=recv(control_fd,command,sizeof(command)-1,0);
+            if (n>0) { command[n]=0;
+                if (control_command(&s,command)) printf("Bad input: %s\n",s.bad_input ? "ON" : "OFF");
+            }
         }
 
         // ---- proxy -> Pi: one wheel packet per pass ---- 
@@ -953,7 +1012,7 @@ int main(int argc, char **argv)
             struct sockaddr_in from;
             socklen_t from_len = sizeof(from);
             ssize_t n = recvfrom(udp_fd, data, sizeof(data), 0, (struct sockaddr *)&from, &from_len);
-            if (n >= 0 && (!pc_ip || from.sin_addr.s_addr == pc_addr.s_addr)) {
+            if (!heartbeat_only && n >= 0 && (!pc_ip || from.sin_addr.s_addr == pc_addr.s_addr)) {
                 test_points_toggle(&tp, TP_UDP_RX);
                 // A newer packet is forwarded now, without waiting for the deadline. 
                 if (wheel_packet(&s, &cal, data, n, now_s())) {
@@ -966,17 +1025,22 @@ int main(int argc, char **argv)
         }
 
         // ---- STM32s -> Pi: heartbeats and force, from both buses ---- 
-        // Both copies of a frame are processed: they carry the same values, so
-        //taking the second one again changes nothing (no dedup needed here). 
+        // Update per-bus heartbeat freshness, then dispatch only the first valid copy.
         for (int b = 0; b < 2; b++) {
             short ev = fds[b == 0 ? 0 : 3].revents;
             if (!(ev & (POLLIN | POLLERR))) continue;
             struct can_frame f;
             while (read(can_fd[b], &f, sizeof(f)) == (ssize_t)sizeof(f)) {
-                if (f.can_dlc != CAN_FRAME_DLC) continue;
+                if (f.can_id & (CAN_EFF_FLAG | CAN_RTR_FLAG | CAN_ERR_FLAG)) continue;
                 double t = now_s();
-                s.bus_have_rx[b] = true;             // R4.7: traffic on this bus 
-                s.bus_last_rx[b] = t;
+                enum lab3_rx_result received = lab3_receive(&rx_state, (uint16_t)f.can_id,
+                    (unsigned)b, f.data, f.can_dlc, (uint64_t)(t * 1000));
+                if (lab3_hb_peer((uint16_t)f.can_id) >= 0 &&
+                    rx_state.bus_advanced) {
+                    s.bus_have_rx[b] = true;
+                    s.bus_last_rx[b] = t;
+                }
+                if (received != LAB3_RX_NEW) continue;
                 if (f.can_id == CAN_ID_FAULT) {
                     if (!s.have_fault_rx || t - s.fault_rx_at >= FAULT_HOLD_S)
                         printf("FAULT received: zone %u reason %u\n", (unsigned)f.data[FAULT_ZONE],
@@ -989,6 +1053,7 @@ int main(int argc, char **argv)
                     int v = (int8_t)f.data[FORCE_VALUE];
                     s.force = (int8_t)(v < FORCE_MIN ? FORCE_MIN : v > FORCE_MAX ? FORCE_MAX : v);
                     s.have_force = true;
+                    s.force_at=t;
                     continue;
                 }
                 if (f.can_id == CAN_ID_HB_N2) {
@@ -1013,6 +1078,42 @@ int main(int argc, char **argv)
             }
         }
 
+        if (heartbeat_only) {
+            double now = now_s();
+            uint64_t ms = (uint64_t)(now * 1000);
+            struct lab3_health health = lab3_health_get(&rx_state, 0, ms);
+            s.degraded[0] = !!(health.degraded & HB_BUS_A_DEGRADED);
+            s.degraded[1] = !!(health.degraded & HB_BUS_B_DEGRADED);
+            s.isolated = health.isolated;
+            s.error = true;
+            s.error_reason = health.missing_peers ? "LINK_LOST" : "STARTUP (heartbeat-only; no CTRL)";
+            test_points_set(&tp, TP_DEG_A, s.degraded[0]);
+            test_points_set(&tp, TP_DEG_B, s.degraded[1]);
+            if (now >= next_hb) {
+                struct can_frame hb;
+                build_heartbeat_frame(&hb, &s);
+                hb.data[HB_REASON] = health.missing_peers ? 2 : SYS_STARTUP;
+                uint16_t applied = lab3_hb_applied_total(&rx_state);
+                hb.data[6] = (uint8_t)applied; hb.data[7] = (uint8_t)(applied >> 8);
+                can_send_both(can_fd, &tp, &hb);
+                s.hb_seq = (s.hb_seq + 1) & CAN_SEQ_MASK;
+                next_hb = advance_deadline(next_hb, now, HB_PERIOD_S);
+            }
+            if (!quiet && now >= next_status) {
+                printf("HB_ONLY N2 applied=%u A=%u B=%u; N3 applied=%u A=%u B=%u; dup=%u repeat=%u old=%u conflict=%u invalid=%u\n",
+                    rx_state.hb_applied[1], rx_state.hb_bus_count[1][0], rx_state.hb_bus_count[1][1],
+                    rx_state.hb_applied[2], rx_state.hb_bus_count[2][0], rx_state.hb_bus_count[2][1],
+                    rx_state.counts[LAB3_RX_DUPLICATE], rx_state.counts[LAB3_RX_REPEAT],
+                    rx_state.counts[LAB3_RX_OLD], rx_state.counts[LAB3_RX_CONFLICT], rx_state.counts[LAB3_RX_INVALID]);
+                printf("HB_ONLY TX queued=%u/%u failed=%u/%u\n", tx_queued[0], tx_queued[1], tx_failed[0], tx_failed[1]);
+                printf("HEALTH DEG_A=%d DEG_B=%d missing=0x%x isolated=%d\n",
+                    s.degraded[0], s.degraded[1], health.missing_peers, health.isolated);
+                next_status = now + 1.0;
+            }
+            next_send = next_force = next_hb;
+            continue;
+        }
+
         // ---- keyboard ---- 
         if (fds[2].revents & (POLLIN | POLLHUP)) {
             char keys[64];
@@ -1030,7 +1131,8 @@ int main(int argc, char **argv)
 
         // ---- Pi -> STM32s: CTRL on a wheel update or the 20 ms deadline ---- 
         double now = now_s();
-        drive_enable_update(&s, now);
+        if (ctrl_blink_only) s.drive_enable=false;
+        else drive_enable_update(&s, now);
         if (send_update || now >= next_send) {
             if (!s.cockpit_failed) {                 // a failed zone is silent 
                 bool stale = !wheel_fresh(&s, now) || !heartbeat_fresh(&s, now);
@@ -1048,6 +1150,7 @@ int main(int argc, char **argv)
         // ---- Lab 3: zone state, DEG LEDs, FAULT ---- 
         now = now_s();
         zone_state_update(&s, now);
+        test_points_set(&tp,TP_ERR,s.error);
         test_points_set(&tp, TP_DEG_A, s.degraded[0] || s.isolated);
         test_points_set(&tp, TP_DEG_B, s.degraded[1] || s.isolated);
         if (s.fault_to_send) {
@@ -1069,7 +1172,7 @@ int main(int argc, char **argv)
 
         // ---- HB_N1 every 20 ms while the wheel stream is fresh ---- 
         if (now >= next_hb) {
-            if (wheel_fresh(&s, now) && !s.cockpit_failed) {
+            if ((wheel_fresh(&s, now) || (ctrl_blink_only && !s.have_rx)) && !s.cockpit_failed) {
                 struct can_frame hbf;
                 build_heartbeat_frame(&hbf, &s);
                 can_send_both(can_fd, &tp, &hbf);
@@ -1080,8 +1183,8 @@ int main(int argc, char **argv)
 
         // ---- latest FORCE value to the proxy every 50 ms (R2.3) ---- 
         if (now >= next_force) {
-            if (s.have_proxy) {
-                int8_t v = s.have_force ? s.force : 0;
+            if (s.have_proxy && (!ctrl_blink_only || demo_feedback)) {
+                int8_t v = !s.error && s.have_force && now-s.force_at<.150 ? s.force : 0;
                 sendto(udp_fd, &v, 1, MSG_DONTWAIT, (struct sockaddr *)&s.proxy, sizeof(s.proxy));
             }
             next_force = advance_deadline(next_force, now, FORCE_PERIOD_S);
@@ -1100,11 +1203,12 @@ int main(int argc, char **argv)
     struct can_frame frame;
     build_command_frame(&frame, &s, true);
     test_points_toggle(&tp, TP_CMD_TX);
-    can_send_both(can_fd, &tp, &frame);
+    if (!heartbeat_only) can_send_both(can_fd, &tp, &frame);
 
     close(can_fd[0]);
     close(can_fd[1]);
     close(udp_fd);
+    if (control_fd>=0) { close(control_fd);unlink(control_path); }
     test_points_close(&tp);
     printf("Stopped.\n");
     return exit_code;
