@@ -10,9 +10,8 @@ west build -b nucleo_f401re stm32_n2/stm32_app -d build-front -p always
 
 The N2 app selects `front_zone.conf` and `boards/nucleo_f401re_front.overlay`
 automatically. It builds only the Lab 3 CAN, steering, and front-blinker
-sources. Its CAN IDs, payload structures, and zone states come from
-`stm32_n3/logic/comms/can_comms.h`; N2 keeps its own receive and transmit logic.
-Keep `build-front`
+sources. N2's `can_comms.h` defines the CAN catalog and payload structs directly,
+using N3's message IDs, zone-state values, and payload layout. Keep `build-front`
 separate from any older build directory.
 
 After verifying the physical wiring and power, flash with:

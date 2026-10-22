@@ -1,51 +1,103 @@
 #ifndef FRONT_CAN_COMMS_H_
-#define FRONT_CAN_COMMS_H_
+#define FRONT_CAN_COMMS_H_ /* Prevent duplicate inclusion. */
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-#include "../../../stm32_n3/logic/comms/can_comms.h" /* Team wire IDs, states and payloads. */
+/** Message catalog IDs: N1 = Pi, N2 = front STM32, N3 = back STM32. */
+#define CAN_ID_CTRL  0x010u /* N1 control command to N2 and N3. */
+#define CAN_ID_FAULT 0x020u /* Fault announcement from any node. */
+#define CAN_ID_HB_N1 0x100u /* N1 cockpit heartbeat. */
+#define CAN_ID_HB_N2 0x101u /* N2 front-zone heartbeat. */
+#define CAN_ID_HB_N3 0x102u /* N3 rear-zone heartbeat. */
+#define CAN_ID_BLINK 0x200u /* N1 blinker mode and phase. */
+#define CAN_ID_FORCE 0x300u /* N2 dummy force feedback to N1. */
+#define CAN_FRAME_DLC 8u    /* Data bytes in each catalog frame. */
 
-/* N3 defines the wire structs; these are N2's field indexes and helpers. */
-#define CAN_FRAME_DLC 8u
-#define CAN_B0 0u
-#define CAN_SEQ_MASK 0x0fu
-#define CAN_FLAG_SYS_ERROR 0x01u
-#define CTRL_FLAG_UDP_STALE 0x01u
-#define CAN_DEDUP_RESET_MS 100u
-#define ZONE_COCKPIT 1u
-#define ZONE_STEERING 2u
-#define ZONE_DRIVETRAIN 3u
-#define CTRL_STEER_LO 1u
-#define CTRL_STEER_HI 2u
-#define CTRL_THROTTLE 3u
-#define CTRL_BRAKE 4u
-#define CTRL_BUTTONS 5u
-#define CTRL_RESERVED 6u
-#define CTRL_CRC 7u
-#define CTRL_STEER_MIN (-1000)
-#define CTRL_STEER_MAX 1000
-#define FAULT_ZONE 1u
-#define FAULT_REASON 2u
-#define FAULT_R_SELF_TEST 1u
-#define FAULT_R_BAD_INPUT 2u
-#define FAULT_R_ZONE_LOST 4u
-#define FAULT_R_OUTPUT 6u
-#define FAULT_R_SHUTDOWN 7u
-#define HB_STATE 1u
-#define HB_BUS 2u
-#define HB_BUS_A_OK 0x01u
-#define HB_BUS_B_OK 0x02u
-#define BLINK_MODE 1u
-#define BLINK_PHASE 2u
-#define BLINK_MODE_OFF 0u
-#define BLINK_MODE_LEFT 1u
-#define BLINK_MODE_RIGHT 2u
-#define BLINK_MODE_HAZARD 3u
-#define FORCE_VALUE 1u
-#define FORCE_MIN (-100)
-#define FORCE_MAX 100
+/** Zone states: values follow N3's CAN header. */
+enum zone_state {
+    ZONE_STATE_INIT = 0,       /* Startup; not yet ready. */
+    ZONE_STATE_NORMAL = 1,     /* Healthy and processing commands. */
+    ZONE_STATE_LOCAL_FAIL = 2, /* This node's local self-test failure. */
+    ZONE_STATE_LINK_LOST = 3,  /* Commands or peer heartbeats timed out. */
+    ZONE_STATE_SYS_ERROR = 4,  /* Input, output, or remote system error. */
+};
+
+/** Packed CAN payloads; each is exactly eight bytes. */
+struct __attribute__((packed)) ctrl_payload {
+    uint8_t flags_seq; /* Flags high nibble; sequence low nibble. */
+    int16_t steering;  /* Decode little-endian bytes explicitly. */
+    uint8_t throttle;  /* 0..255 */
+    uint8_t brake;     /* 0..255 */
+    uint8_t buttons;
+    uint8_t reserved;
+    uint8_t crc8;
+};
+
+struct __attribute__((packed)) fault_payload {
+    uint8_t flags_seq;
+    uint8_t failing_zone_id;
+    uint8_t reason_code;
+    uint8_t reserved[5];
+};
+
+struct __attribute__((packed)) hb_payload {
+    uint8_t flags_seq;
+    uint8_t zone_state;
+    uint8_t bus_health; /* Bit 0 = bus A OK; bit 1 = bus B OK. */
+    uint8_t reserved[5];
+};
+
+struct __attribute__((packed)) blink_payload {
+    uint8_t flags_seq;
+    uint8_t mode;  /* OFF, LEFT, RIGHT, HAZARD. */
+    uint8_t phase; /* Current on/off phase. */
+    uint8_t reserved[5];
+};
+
+struct __attribute__((packed)) force_payload {
+    uint8_t flags_seq;
+    int8_t force;
+    uint8_t reserved[6];
+};
+
+#define CAN_B0 0u                  /* Byte index of flags/sequence field. */
+#define CAN_SEQ_MASK 0x0fu         /* Low four bits carry sequence 0..15. */
+#define CAN_FLAG_SYS_ERROR 0x01u   /* Team-defined error flag in high nibble. */
+#define CTRL_FLAG_UDP_STALE 0x01u  /* CTRL flag: upstream wheel/link data stale. */
+#define ZONE_COCKPIT 1u            /* Numeric FAULT source ID for N1. */
+#define ZONE_STEERING 2u           /* Numeric FAULT source ID for N2. */
+#define ZONE_DRIVETRAIN 3u         /* Numeric FAULT source ID for N3. */
+#define CTRL_STEER_LO 1u           /* CTRL byte index: steering low byte. */
+#define CTRL_STEER_HI 2u           /* CTRL byte index: steering high byte. */
+#define CTRL_THROTTLE 3u           /* CTRL byte index: throttle value. */
+#define CTRL_BRAKE 4u              /* CTRL byte index: brake value. */
+#define CTRL_BUTTONS 5u            /* CTRL byte index: wheel button bits. */
+#define CTRL_RESERVED 6u           /* CTRL byte index: must be zero. */
+#define CTRL_CRC 7u                /* CTRL byte index: CRC over bytes 0..6. */
+#define CTRL_STEER_MIN (-1000)     /* Team-defined full-left command. */
+#define CTRL_STEER_MAX 1000        /* Team-defined full-right command. */
+#define FAULT_ZONE 1u              /* FAULT byte index: failing zone ID. */
+#define FAULT_REASON 2u            /* FAULT byte index: reason code. */
+#define FAULT_R_SELF_TEST 1u       /* Reason: physical self-test button. */
+#define FAULT_R_BAD_INPUT 2u       /* Reason: malformed/out-of-range CTRL. */
+#define FAULT_R_ZONE_LOST 4u       /* Reason: peer heartbeat timeout. */
+#define FAULT_R_OUTPUT 6u          /* Reason: actuator/output failure. */
+#define FAULT_R_SHUTDOWN 7u        /* Reason: cockpit shutdown. */
+#define HB_STATE 1u                /* Heartbeat byte index: zone state. */
+#define HB_BUS 2u                  /* Heartbeat byte index: bus-health bits. */
+#define HB_BUS_A_OK 0x01u          /* Bit set when bus A is reachable. */
+#define HB_BUS_B_OK 0x02u          /* Bit set when bus B is reachable. */
+#define BLINK_MODE 1u              /* BLINK byte index: selected mode. */
+#define BLINK_PHASE 2u             /* BLINK byte index: current on/off phase. */
+#define BLINK_MODE_OFF 0u          /* Neither turn lamp requested. */
+#define BLINK_MODE_LEFT 1u         /* Left turn lamps requested. */
+#define BLINK_MODE_RIGHT 2u        /* Right turn lamps requested. */
+#define BLINK_MODE_HAZARD 3u       /* Both sides requested. */
+#define FORCE_VALUE 1u             /* FORCE byte index: signed dummy value. */
+#define FORCE_MIN (-100)           /* Minimum dummy force value. */
+#define FORCE_MAX 100              /* Maximum dummy force value. */
 
 static inline uint8_t can_byte0(uint8_t seq, uint8_t flags)
 {
@@ -53,11 +105,6 @@ static inline uint8_t can_byte0(uint8_t seq, uint8_t flags)
 }
 static inline uint8_t can_seq_of(const uint8_t *data) { return data[CAN_B0] & CAN_SEQ_MASK; }
 static inline uint8_t can_flags_of(const uint8_t *data) { return data[CAN_B0] >> 4; }
-static inline int can_seq_is_new(uint8_t last, uint8_t next)
-{
-    uint8_t distance = (uint8_t)((next - last) & CAN_SEQ_MASK);
-    return distance >= 1u && distance <= 7u;
-}
 static inline uint8_t can_crc8(const uint8_t *data, size_t len)
 {
     uint8_t crc = 0xffu;
@@ -74,10 +121,16 @@ _Static_assert(sizeof(struct fault_payload) == CAN_FRAME_DLC, "FAULT must be 8 b
 _Static_assert(sizeof(struct hb_payload) == CAN_FRAME_DLC, "HB must be 8 bytes");
 _Static_assert(sizeof(struct blink_payload) == CAN_FRAME_DLC, "BLINK must be 8 bytes");
 _Static_assert(sizeof(struct force_payload) == CAN_FRAME_DLC, "FORCE must be 8 bytes");
-_Static_assert(offsetof(struct hb_payload, zone_state) == HB_STATE,
-               "N3 heartbeat state byte changed");
-_Static_assert(offsetof(struct hb_payload, bus_health) == HB_BUS,
-               "N3 heartbeat bus-health byte changed");
+_Static_assert(offsetof(struct hb_payload, zone_state) == HB_STATE, "HB state offset");
+_Static_assert(offsetof(struct hb_payload, bus_health) == HB_BUS, "HB bus offset");
+
+/* N2's duplicate-tracking policy */
+#define CAN_DEDUP_RESET_MS 100u /* Forget old sequence after this idle time. */
+static inline int can_seq_is_new(uint8_t last, uint8_t next)
+{
+    uint8_t distance = (uint8_t)((next - last) & CAN_SEQ_MASK);
+    return distance >= 1u && distance <= 7u;
+}
 
 /* Pin-independent representation of one standard CAN frame. */
 struct front_frame {
@@ -159,7 +212,7 @@ int front_build_fault(uint8_t sequence, uint8_t reason, struct front_frame *out)
 int front_build_force(uint8_t sequence, int8_t force, struct front_frame *out);
 
 /* One slot per CAN ID; zone logic uses this to ignore old/redundant commands. */
-#define FRONT_DEDUP_SLOTS 7u
+#define FRONT_DEDUP_SLOTS 7u /* One duplicate-tracking slot per catalog ID. */
 struct front_dedup_slot {
     uint32_t last_ms;
     uint8_t sequence;
