@@ -4,25 +4,18 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-enum blinker_mode {
-	BLINKER_MODE_OFF = 0,
-	BLINKER_MODE_LEFT,
-	BLINKER_MODE_RIGHT,
-	BLINKER_MODE_HAZARD,
+struct rear_blinker_outputs {
+    bool left;
+    bool right;
 };
 
-/**
- * @brief Initialize rear left and right blinker GPIO pins.
- */
-int blinkers_init(void);
+/* Normal turn signals follow the received phase. A zone fault overrides it
+ * with local hazards, toggling both lamps every 250 ms. */
+void rear_blinkers_resolve(uint8_t mode, bool phase_on, bool zone_fault,
+                           uint32_t now_ms, struct rear_blinker_outputs *out);
 
-/**
- * @brief Directly apply state from received CAN 0x200 BLINK payload.
- * @param mode Blinker mode (OFF, LEFT, RIGHT, HAZARD)
- * @param phase True = ON state, False = OFF state
- */
-int blinkers_set_state(enum blinker_mode mode, bool phase);
-
-// enum blinker_mode blinkers_get_mode(void);
+/* The hardware functions are called by back_zone after its safety checks. */
+int rear_blinkers_init(void);
+int rear_blinkers_apply(const struct rear_blinker_outputs *out);
 
 #endif /* BLINKERS_BACK_H_ */
