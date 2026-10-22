@@ -1,4 +1,5 @@
 #include "brake.h"
+#include "motor_control.h"
 
 int motor_brake_all(void)
 {
