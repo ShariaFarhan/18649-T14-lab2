@@ -1,6 +1,6 @@
 # Lab 3: wiring, running, and testing the Team 14 demo
 
-Use branch **`codex/lab3-complete-test-guide`**. This guide describes the
+Use branch **`lab3-complete`**. This guide describes the
 dual-CAN application in `stm32/lab3_app`, not the older Lab 2 UART application.
 
 ## 1. What this version does
@@ -135,7 +135,7 @@ Nucleo; its build-time selection is explained in [LAB3_COMPLETION.md](LAB3_COMPL
 Clone the same branch on the build computer and Pi:
 
 ```sh
-git clone --branch codex/lab3-complete-test-guide https://github.com/ShariaFarhan/18649-T14-lab2.git
+git clone --branch lab3-complete https://github.com/ShariaFarhan/18649-T14-lab2.git
 cd 18649-T14-lab2
 ```
 
