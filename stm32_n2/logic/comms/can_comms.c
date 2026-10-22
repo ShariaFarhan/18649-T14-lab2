@@ -168,9 +168,8 @@ int front_decode_control(const struct front_frame *frame, struct front_command *
     uint16_t bits = (uint16_t)frame->data[CTRL_STEER_LO] |
                     ((uint16_t)frame->data[CTRL_STEER_HI] << 8);
     int32_t steering = (bits & 0x8000u) ? (int32_t)bits - 65536 : (int32_t)bits;
+    /* N3's payload allows the full uint8_t pedal range. */
     if (steering < CTRL_STEER_MIN || steering > CTRL_STEER_MAX ||
-        frame->data[CTRL_THROTTLE] > CTRL_PEDAL_PRESSED ||
-        frame->data[CTRL_BRAKE] > CTRL_PEDAL_PRESSED ||
         frame->data[CTRL_RESERVED] != 0)
         return FRONT_DECODE_RANGE;
 
@@ -196,8 +195,8 @@ int front_decode_heartbeat(const struct front_frame *frame, struct front_heartbe
     else if (frame->id == CAN_ID_HB_N3) zone = ZONE_DRIVETRAIN;
     else return FRONT_DECODE_FORMAT;
 
-    if (frame->data[HB_STATE] > ZONE_STATE_LOCAL_FAULT ||
-        (frame->data[HB_BUS] & (uint8_t)~(HB_BUS_A_DEGRADED | HB_BUS_B_DEGRADED)))
+    if (frame->data[HB_STATE] > ZONE_STATE_SYS_ERROR ||
+        (frame->data[HB_BUS] & (uint8_t)~(HB_BUS_A_OK | HB_BUS_B_OK)))
         return FRONT_DECODE_RANGE;
     *out = (struct front_heartbeat){
         .zone = zone,
@@ -225,17 +224,16 @@ int front_decode_fault(const struct front_frame *frame, struct front_fault *out)
 }
 
 int front_build_heartbeat(uint8_t sequence, uint8_t state, uint8_t bus_health,
-                          uint8_t reason, struct front_frame *out)
+                          struct front_frame *out)
 {
-    if (out == NULL || sequence > CAN_SEQ_MASK || state > ZONE_STATE_LOCAL_FAULT ||
-        (bus_health & (uint8_t)~(HB_BUS_A_DEGRADED | HB_BUS_B_DEGRADED)))
+    if (out == NULL || sequence > CAN_SEQ_MASK || state > ZONE_STATE_SYS_ERROR ||
+        (bus_health & (uint8_t)~(HB_BUS_A_OK | HB_BUS_B_OK)))
         return FRONT_DECODE_RANGE;
     *out = (struct front_frame){ .id = CAN_ID_HB_N2, .dlc = CAN_FRAME_DLC };
     out->data[CAN_B0] = can_byte0(sequence, state != ZONE_STATE_NORMAL ?
                                                 CAN_FLAG_SYS_ERROR : 0);
     out->data[HB_STATE] = state;
     out->data[HB_BUS] = bus_health;
-    out->data[HB_REASON] = reason;
     return FRONT_DECODE_OK;
 }
 

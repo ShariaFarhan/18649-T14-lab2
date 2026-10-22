@@ -140,15 +140,15 @@ static void maybe_relay(const struct front_zone *zone, const struct front_frame 
     if (source < 0 || recipient < 0 || zone->local_fault) return;
     const struct front_zone_peer *peer = &zone->peer[recipient];
     const struct front_zone_peer *sender = &zone->peer[source];
-    uint8_t lost_bus_bit = bus == 0 ? HB_BUS_A_DEGRADED : HB_BUS_B_DEGRADED;
-    uint8_t other_bus_bit = bus == 0 ? HB_BUS_B_DEGRADED : HB_BUS_A_DEGRADED;
+    uint8_t source_bus_bit = bus == 0 ? HB_BUS_A_OK : HB_BUS_B_OK;
+    uint8_t other_bus_bit = bus == 0 ? HB_BUS_B_OK : HB_BUS_A_OK;
     uint8_t other = 1u - bus;
     if (!peer_alive(sender, now_ms) ||
         !fresh(peer->seen_bus[other], peer->last_bus_ms[other], now_ms,
                FRONT_HEARTBEAT_TIMEOUT_MS)) return;
-    if ((peer->reported_bus_health & lost_bus_bit) &&
-        !(peer->reported_bus_health & other_bus_bit) &&
-        (sender->reported_bus_health & other_bus_bit)) {
+    if (!(peer->reported_bus_health & source_bus_bit) &&
+        (peer->reported_bus_health & other_bus_bit) &&
+        !(sender->reported_bus_health & other_bus_bit)) {
         action->relay_requested = true;
         action->relay_bus = other;
         action->relay_frame = *frame;
@@ -267,14 +267,24 @@ void front_zone_set_output_fault(struct front_zone *zone, bool failed,
     flush_fault(zone, now_ms, action);
 }
 
-bool front_zone_heartbeat_fields(const struct front_zone *zone,
+bool front_zone_heartbeat_fields(const struct front_zone *zone, uint32_t now_ms,
                                  uint8_t *state, uint8_t *bus_health)
 {
     if (zone == NULL || state == NULL || bus_health == NULL || zone->local_fault) return false;
-    *state = (zone->bad_input || zone->output_fault) ? ZONE_STATE_LOCAL_FAULT :
+    *state = zone->status.state == FRONT_ZONE_STARTUP ? ZONE_STATE_INIT :
+             (!peer_alive(&zone->peer[0], now_ms) ||
+              !peer_alive(&zone->peer[1], now_ms) ||
+              !fresh(zone->have_ctrl, zone->last_ctrl_ms, now_ms,
+                     FRONT_CTRL_TIMEOUT_MS) || zone->ctrl_stale) ? ZONE_STATE_LINK_LOST :
              zone->status.error ? ZONE_STATE_SYS_ERROR : ZONE_STATE_NORMAL;
-    *bus_health = (zone->status.degraded[0] ? HB_BUS_A_DEGRADED : 0) |
-                  (zone->status.degraded[1] ? HB_BUS_B_DEGRADED : 0);
+    *bus_health = 0;
+    for (unsigned bus = 0; bus < 2; ++bus) {
+        if (fresh(zone->peer[0].seen_bus[bus], zone->peer[0].last_bus_ms[bus],
+                  now_ms, FRONT_HEARTBEAT_TIMEOUT_MS) ||
+            fresh(zone->peer[1].seen_bus[bus], zone->peer[1].last_bus_ms[bus],
+                  now_ms, FRONT_HEARTBEAT_TIMEOUT_MS))
+            *bus_health |= bus == 0 ? HB_BUS_A_OK : HB_BUS_B_OK;
+    }
     return true;
 }
 
@@ -301,8 +311,8 @@ void front_zone_periodic(struct front_zone *zone, uint32_t now_ms,
     if (deadline_due(now_ms, zone->next_hb_ms)) {
         advance_deadline(&zone->next_hb_ms, now_ms, FRONT_HB_PERIOD_MS);
         uint8_t state, buses;
-        if (front_zone_heartbeat_fields(zone, &state, &buses) &&
-            front_build_heartbeat(zone->hb_sequence, state, buses, 0,
+        if (front_zone_heartbeat_fields(zone, now_ms, &state, &buses) &&
+            front_build_heartbeat(zone->hb_sequence, state, buses,
                                   &out->heartbeat) == FRONT_DECODE_OK) {
             out->heartbeat_due = true;
             zone->hb_sequence = (zone->hb_sequence + 1u) & CAN_SEQ_MASK;

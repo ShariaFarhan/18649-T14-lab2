@@ -107,7 +107,7 @@ void front_zone_set_output_fault(struct front_zone *zone, bool failed,
                                  uint32_t now_ms, struct front_zone_action *action);
 
 /* LOCAL_FAULT deliberately suppresses N2 heartbeat transmission. */
-bool front_zone_heartbeat_fields(const struct front_zone *zone,
+bool front_zone_heartbeat_fields(const struct front_zone *zone, uint32_t now_ms,
                                  uint8_t *state, uint8_t *bus_health);
 
 /* Call after tick from the TX scheduler; send each returned frame on A and B. */
