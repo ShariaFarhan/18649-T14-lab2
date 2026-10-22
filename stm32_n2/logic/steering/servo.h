@@ -5,11 +5,11 @@
 
 /*
  * Normalized steering commands before reaching this module
- *   -100 = full left, 0 = center, +100 = full right.
+ *   -1000 = full left, 0 = center, +1000 = full right.
  */
-#define SERVO_STEERING_MIN       (-100)
+#define SERVO_STEERING_MIN       (-1000)
 #define SERVO_STEERING_CENTER    0
-#define SERVO_STEERING_MAX       100
+#define SERVO_STEERING_MAX       1000
 
 #ifndef SERVO_PERIOD_US
 #define SERVO_PERIOD_US          20000U
@@ -34,9 +34,10 @@ int servo_prepare(void);
 int servo_init(void);
 
 /*
- * Set a normalized steering command. Values outside [-100, 100] are clamped before being mapped to the calibrated pulse-width endpoints.
+ * Set a normalized steering command. Values outside [-1000, 1000] are clamped
+ * before being mapped to the calibrated pulse-width endpoints.
  */
-int servo_set_steering(int16_t steering_percent);
+int servo_set_steering(int16_t steering_normalized);
 
 /* Move to the configured center position. */
 int servo_center(void);

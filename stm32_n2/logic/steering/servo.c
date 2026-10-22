@@ -106,9 +106,9 @@ int servo_init(void)
     return rc;
 }
 
-int servo_set_steering(int16_t steering_percent)
+int servo_set_steering(int16_t steering_normalized)
 {
-    return set_pulse_us(steering_to_pulse_us(steering_percent));
+    return set_pulse_us(steering_to_pulse_us(steering_normalized));
 }
 
 int servo_center(void)
