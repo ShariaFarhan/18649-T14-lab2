@@ -17,7 +17,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stddef.h>
 #include <string.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
@@ -25,10 +24,6 @@
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
-
-#if __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
-#error "The proxy packet and the CAN payloads are little-endian."
-#endif
 
 #define UDP_PORT            8000     
 #define FORCE_PORT          8001
@@ -229,7 +224,6 @@ static const char *const STATE_NAME[] = { "INIT", "NORMAL", "LOCAL_FAIL", "LINK_
 
 #define STATE_STR(z) ((unsigned)(z) < 5 ? STATE_NAME[z] : "?")
 
-static const char *const BLINK_NAME[] = { "off", "left", "right", "hazard" };
 static const char *const REASON_NAME[] = {
     "none", "test-button", "hb-timeout", "bad-range", "bad-crc", "udp-loss",
     "isolated", "watchdog", "startup", "fault-rx", "shutdown", "output"
@@ -255,7 +249,6 @@ static const char *const REASON_NAME[] = {
 #define DUP_WINDOW_S        0.010 
 #define STALE_WINDOW_S      0.100
 #define MON_PERIOD_S        0.005
-#define STATUS_PERIOD_S     0.500
 
 //------------------------------------TESTPOINTS AND LEDS------------------------
 
@@ -380,7 +373,7 @@ typedef struct {
  
 
     //schedule
-    double next_hb, next_mon, next_force, next_status, last_ctrl_tx;
+    double next_hb, next_mon, next_force, last_ctrl_tx;
 
     //measurement 
     uint32_t lat_hist[20001];
@@ -870,7 +863,7 @@ static void hb_mon(state_t *s, double now)
     for (int z = 2; z <= 3; z++)
         for (int b = 0; b < 2; b++) any |= fresh(s->bus[b].last_hb[z], now, HB_TIMEOUT_S);
     bool iso = !any && (s->ever_heard[2] || s->ever_heard[3]);
-    if (iso != s->isolated) EVT(now, "%s", iso ? "ISOLATED: no heartbeats on either bus" : "no longer isolated");
+    if (iso && !s->isolated) EVT(now, "ISOLATED: no heartbeats on either bus");
     s->isolated = iso;
 
     /* R4.5: failed = three heartbeats missed on BOTH buses. */
@@ -878,7 +871,6 @@ static void hb_mon(state_t *s, double now)
         bool alive = fresh(s->bus[0].last_hb[z], now, HB_TIMEOUT_S) || fresh(s->bus[1].last_hb[z], now, HB_TIMEOUT_S);
         s->zone_alive[z] = alive;
         if (alive) {
-            if (s->zone_failed[z]) EVT(now, "zone %d heartbeat back", z);
             s->zone_failed[z] = false;
             s->fault_pending[z] = 0;
         } else if (s->ever_heard[z] && !s->zone_failed[z]) {
@@ -935,13 +927,9 @@ static void can_frame_rx(state_t *s, int bus, const struct can_frame *f, double 
         memcpy(&hb, f->data, sizeof(hb));
         int z = (int)(id - ID_HB_N1) + 1;
         b->last_hb[z] = now;                       /* per bus, before dedup */
-        if (!s->ever_heard[z]) EVT(now, "zone %d heard first on %s", z, b->ifname);
         s->ever_heard[z] = true;
         s->zone_alive[z] = true;
         if (!dedup_accept(z == 2 ? &s->dd_hb2 : &s->dd_hb3, hb.flags_seq, now)) { s->dup_dropped++; break; }
-        if (hb.zone_state != s->zone_hb_state[z] || hb.bus_health != s->zone_hb_health[z])
-            EVT(now, "zone %d reports %s, bus A %s, bus B %s", z, STATE_STR(hb.zone_state),
-                hb.bus_health & HB_BUS_A_OK ? "ok" : "DEGRADED", hb.bus_health & HB_BUS_B_OK ? "ok" : "DEGRADED");
         s->zone_hb_state[z] = hb.zone_state;
         s->zone_hb_health[z] = hb.bus_health;
         break;
@@ -1087,8 +1075,6 @@ static void udp_rx(state_t *s, const struct in_addr *pc_addr)
 
         bool resumed = false;
         if (!wheel_packet(s, data, n, t_rx, &resumed)) continue;
-        if (!s->have_proxy || s->proxy.sin_addr.s_addr != from.sin_addr.s_addr)
-            EVT(t_rx, "wheel stream from %s", inet_ntoa(from.sin_addr));
         s->proxy = from;
         s->have_proxy = true;
         if (s->self_fail & SF_UDP) { set_self_fail(s, SF_UDP, false, R_NONE, t_rx); update_state(s, t_rx); }
@@ -1127,37 +1113,7 @@ static void print_stats(const state_t *s)
     printf("  n=%llu p50=%ld us p99=%ld us max=%.0f us | CTRL gap min=%.2f max=%.2f ms | UDP=%llu CTRL=%llu\n",
            (unsigned long long)s->lat_n, p50, p99, s->lat_max, s->gap_min * 1e3, s->gap_max * 1e3,
            (unsigned long long)s->udp_packets, (unsigned long long)s->ctrl_sent);
-    for (int b = 0; b < 2; b++)
-        printf("  %s: tx ok=%llu fail=%llu%s%s rx=%llu err-frames=%llu\n", s->bus[b].ifname,
-               (unsigned long long)s->bus[b].tx_ok, (unsigned long long)s->bus[b].tx_fail,
-               s->bus[b].tx_fail ? " last=" : "", s->bus[b].tx_fail ? strerror(s->bus[b].last_errno) : "",
-               (unsigned long long)s->bus[b].rx, (unsigned long long)s->bus[b].err_frames);
-    printf("  duplicates dropped: %llu\n", (unsigned long long)s->dup_dropped);
 }
-static void print_age(const canbus_t *b, int z, double now)
-{
-    if (b->last_hb[z] <= 0) printf("  --");
-    else if (now - b->last_hb[z] > 0.999) printf(" >1s");
-    else printf("%4.0f", (now - b->last_hb[z]) * 1e3);
-}
-
-static void print_status(const state_t *s, double now)
-{
-    printf("[%9.3f] %-10s", now - g_t0, STATE_STR(s->state));
-    if (s->state != ZONE_STATE_NORMAL) printf("(%s)", REASON_STR(s->reason));
-    if (fresh(s->last_rx, now, UDP_TIMEOUT_S))
-        printf(" | steer=%+5d thr=%3u brk=%3u", s->steer, s->throttle, s->brake);
-    else
-        printf(" | no wheel packets");
-    printf(" blink=%s%s | HB age ms A:N2", s->tx_mode < 4 ? BLINK_NAME[s->tx_mode] : "-", s->lamps ? "*" : "");
-    print_age(&s->bus[0], 2, now); printf(" N3"); print_age(&s->bus[0], 3, now);
-    printf(" B:N2"); print_age(&s->bus[1], 2, now); printf(" N3"); print_age(&s->bus[1], 3, now);
-    printf(" | DEG_A=%d DEG_B=%d", s->deg[0], s->deg[1]);
-    if (fresh(s->force_rx, now, FORCE_STALE_S)) printf(" force=%+d", s->force);
-    if (s->inject_persistent) printf(" BAD-INPUT");
-    printf("\n");
-}
-
 
 /* ------------------------------- MAIN ----------------------------------- */
 
@@ -1179,8 +1135,9 @@ static void usage(const char *prog)
         "  --gpio NAME=BCM       move a test point (udp_rx cmd_tx can_tx_a can_tx_b deg_a deg_b err)\n"
         "  --rt PRIO             SCHED_FIFO priority, below 50 (the mcp251x IRQ threads)\n"
         "  --cpu N               pin to one CPU\n"
-        "  --quiet               no periodic status line\n"
-        "  --no-test-points      run without the GPIO test points / LEDs\n",
+        "  --no-test-points      run without the GPIO test points / LEDs\n"
+        "Keys (+ Enter): b/t/c next CTRL bad steer/throttle/CRC, B bad steer on/off,\n"
+        "                x test button, s latency stats, q quit\n",
         prog, UDP_PORT, IN_STEER_LEFT, IN_STEER_CENTER, IN_STEER_RIGHT,
         IN_PEDAL_RELEASED, IN_PEDAL_PRESSED, IN_PEDAL_RELEASED, IN_PEDAL_PRESSED,
         RAW_BTN_LSB, RAW_BTN_RSB, RAW_BTN_TEST);
@@ -1221,7 +1178,7 @@ int main(int argc, char **argv)
     static state_t st;                 /* large (histogram): not on the stack */
     state_t *s = &st;
     const char *bind_ip = "0.0.0.0", *pc_ip = NULL;
-    bool use_test_points = true, quiet = false;
+    bool use_test_points = true;
     int rt_prio = 0, cpu = -1;
 
     s->bus[0].ifname = "can0";
@@ -1249,7 +1206,6 @@ int main(int argc, char **argv)
         { "gpio", required_argument, NULL, 'G' },
         { "rt", required_argument, NULL, 'r' },
         { "cpu", required_argument, NULL, 'c' },
-        { "quiet", no_argument, NULL, 'q' },
         { "no-test-points", no_argument, NULL, 'n' },
         { "help", no_argument, NULL, 'h' },
         { 0, 0, 0, 0 }
@@ -1272,7 +1228,6 @@ int main(int argc, char **argv)
         case 'G': args_ok &= parse_gpio(optarg); break;
         case 'r': rt_prio = atoi(optarg); break;
         case 'c': cpu = atoi(optarg); break;
-        case 'q': quiet = true; break;
         case 'n': use_test_points = false; break;
         default: usage(argv[0]); return opt == 'h' ? 0 : 2;
         }
@@ -1329,16 +1284,8 @@ int main(int argc, char **argv)
     s->reason = R_STARTUP;
     s->tx_mode = 0xFF;                             /* forces the first BLINK out */
     s->next_hb = s->next_mon = s->next_force = now;
-    s->next_status = now + STATUS_PERIOD_S;
     test_points_set(&s->tp, TP_ERR, true);
 
-    printf("Cockpit N1: UDP/%d from %s -> CAN A=%s, CAN B=%s\n", UDP_PORT, pc_ip ? pc_ip : "any sender",
-           s->bus[0].ifname, s->bus[1].ifname);
-    printf("Calibration: steer %d,%d,%d  throttle %d,%d  brake %d,%d  buttons LSB=%d RSB=%d test=%d\n",
-           s->cal.steer_left, s->cal.steer_center, s->cal.steer_right, s->cal.throttle_released,
-           s->cal.throttle_pressed, s->cal.brake_released, s->cal.brake_pressed, s->cal.btn_lsb,
-           s->cal.btn_rsb, s->cal.btn_test);
-    if (stdin_open) printf("Keys + Enter: b/t/c bad CTRL once, B bad steering on/off, x test button, s stats, q quit\n");
 
     int exit_code = 0;
     while (g_running) {
@@ -1346,7 +1293,6 @@ int main(int argc, char **argv)
         double next = s->next_mon;
         if (s->next_hb < next) next = s->next_hb;
         if (s->next_force < next) next = s->next_force;
-        if (!quiet && s->next_status < next) next = s->next_status;
         if (s->tx_mode != BLINK_MODE_OFF && s->tx_mode != 0xFF && s->next_toggle < next) next = s->next_toggle;
         if (s->blink_due && s->last_blink_tx + SPORADIC_MIN_S < next) next = s->last_blink_tx + SPORADIC_MIN_S;
         if (s->fault_q_len && s->last_fault_tx + SPORADIC_MIN_S < next) next = s->last_fault_tx + SPORADIC_MIN_S;
@@ -1413,10 +1359,6 @@ int main(int argc, char **argv)
             force_udp(s, now);
             s->next_force = advance_deadline(s->next_force, now, FORCE_PERIOD_S);
         }
-        if (!quiet && now >= s->next_status) {
-            print_status(s, now);
-            s->next_status = now + STATUS_PERIOD_S;
-        }
     }
 
     /* On the way out, tell the other zones at once instead of letting them time out. */
@@ -1434,6 +1376,5 @@ int main(int argc, char **argv)
     close(s->udp_fd);
     close(s->force_fd);
     test_points_close(&s->tp);
-    printf("Stopped.\n");
     return exit_code;
 }
