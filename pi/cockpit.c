@@ -1,4 +1,3 @@
-
 #define _GNU_SOURCE
 #include <arpa/inet.h>
 #include <errno.h>
@@ -431,6 +430,8 @@ static void can_send_both(const int can_fd[2], test_points_t *tp, const struct c
     for (int b = 0; b < 2; b++) {
         if (write(can_fd[b], f, sizeof(*f)) == (ssize_t)sizeof(*f)) {
             ++tx_queued[b];test_points_toggle(tp,b==0 ? TP_CAN_TX_A : TP_CAN_TX_B);
+            //CMD_TX ends the Pi stage (measurement #1): right after the first CAN write returns
+            if (b == 0) test_points_toggle(tp, TP_CMD_TX);
         }
         else ++tx_failed[b];
     }
@@ -1138,8 +1139,7 @@ int main(int argc, char **argv)
                 bool stale = !wheel_fresh(&s, now) || !heartbeat_fresh(&s, now);
                 struct can_frame frame;
                 build_command_frame(&frame, &s, stale);
-                test_points_toggle(&tp, TP_CMD_TX);
-                can_send_both(can_fd, &tp, &frame);
+                can_send_both(can_fd, &tp, &frame);      // toggles CMD_TX after the CAN A write 
                 s.last_tx = now_s();
                 s.have_tx = true;
                 s.serial_seq = (uint8_t)((s.serial_seq + 1) & CAN_SEQ_MASK);
@@ -1202,7 +1202,6 @@ int main(int argc, char **argv)
     s.bad_input = false;
     struct can_frame frame;
     build_command_frame(&frame, &s, true);
-    test_points_toggle(&tp, TP_CMD_TX);
     if (!heartbeat_only) can_send_both(can_fd, &tp, &frame);
 
     close(can_fd[0]);
