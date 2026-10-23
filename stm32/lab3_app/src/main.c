@@ -372,9 +372,17 @@ int main(void)
         int64_t now = k_uptime_get();
         int64_t wait = next_hb > now ? next_hb - now : 0;
         if (wait > 1) wait = 1; /* Refresh LED health even when both receive queues are quiet. */
-        if (!k_msgq_get(&received_q, &item, K_MSEC(wait))) {
+        /* Drain the queue before housekeeping so a CTRL never waits a full loop pass
+         * per frame queued ahead of it. Bounded so a babbling bus cannot starve HB. */
+        k_timeout_t first = K_MSEC(wait);
+        for (unsigned n = 0; n < 16 && !k_msgq_get(&received_q, &item, first); ++n) {
+            first = K_NO_WAIT;
             lab3_profile_begin(PROFILE_DISPATCH);
-            dispatch_frame(&item,(uint64_t)k_uptime_get());
+            uint32_t ctrl_before = ctrl_count;
+            uint64_t at = (uint64_t)k_uptime_get();
+            dispatch_frame(&item, at);
+            /* A new CTRL goes straight to STEER/DRIVE, so CAN_RX's C is one pulse. */
+            if (ctrl_count != ctrl_before) update_control_and_lights(at);
             lab3_profile_end(PROFILE_DISPATCH);
         }
         now = k_uptime_get();
