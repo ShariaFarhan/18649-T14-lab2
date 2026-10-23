@@ -48,7 +48,7 @@
     can_a: mcp2515@0 {
         compatible = "microchip,mcp2515";
         reg = <0>;
-        spi-max-frequency = <1000000>;
+        spi-max-frequency = <8000000>; /* 84 MHz APB2 / 16 = 5.25 MHz (MCP2515 max 10 MHz) */
         osc-freq = <16000000>;
         int-gpios = <&gpioa 10 GPIO_ACTIVE_LOW>;
         bitrate = <500000>;
@@ -58,7 +58,7 @@
     can_b: mcp2515@1 {
         compatible = "microchip,mcp2515";
         reg = <1>;
-        spi-max-frequency = <1000000>;
+        spi-max-frequency = <8000000>; /* 84 MHz APB2 / 16 = 5.25 MHz (MCP2515 max 10 MHz) */
         osc-freq = <16000000>;
         int-gpios = <&gpiob 5 GPIO_ACTIVE_LOW>;
         bitrate = <500000>;
