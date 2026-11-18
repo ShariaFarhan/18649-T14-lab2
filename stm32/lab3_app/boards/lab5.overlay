@@ -1,0 +1,23 @@
+/ {
+    chosen { zephyr,code-partition = &lab5_code; };
+    aliases {
+        lab5-pps = &lab5_pps; lab5-leader = &lab5_leader;
+        lab5-sync = &lab5_sync; lab5-ref-rx = &lab5_ref_rx; lab5-hazard = &lab5_hazard;
+    };
+    lab5_signals {
+        compatible = "gpio-leds";
+        lab5_pps: pps { gpios = <&gpioc 8 GPIO_ACTIVE_HIGH>; }; /* CN10-2 */
+        lab5_leader: leader { gpios = <&gpioc 9 GPIO_ACTIVE_HIGH>; }; /* CN10-1 */
+        lab5_sync: sync { gpios = <&gpioc 5 GPIO_ACTIVE_HIGH>; }; /* CN10-6 */
+        lab5_ref_rx: ref-rx { gpios = <&gpioc 4 GPIO_ACTIVE_HIGH>; }; /* CN10-34 */
+        lab5_hazard: hazard { gpios = <&gpioc 2 GPIO_ACTIVE_HIGH>; }; /* CN7-35 */
+    };
+};
+&flash0 {
+    partitions {
+        compatible = "fixed-partitions";
+        #address-cells = <1>; #size-cells = <1>;
+        lab5_code: partition@0 { label = "lab5-code"; reg = <0 0x20000>; };
+        lab5_log: partition@20000 { label = "lab5-log"; reg = <0x20000 0x60000>; };
+    };
+};

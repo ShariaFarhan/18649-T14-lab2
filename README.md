@@ -1,5 +1,9 @@
 # Team 14 Lab 3: Dual CAN
 
+Local Lab5 additions are documented in [docs/LAB5.md](docs/LAB5.md).
+They are opt-in (`LAB5_ENABLED=ON` / Pi `--lab5-log`); the Lab3 build remains
+the default. This work starts from the team's `lab3-complete` branch.
+
 **[Wiring, running, and testing tutorial](docs/LAB3_TESTING_TUTORIAL.md)**
 
 Windows G920 → UDP → Raspberry Pi → dual CAN → Front and Rear STM32 nodes.

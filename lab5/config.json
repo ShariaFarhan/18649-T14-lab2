@@ -1,0 +1,16 @@
+{
+  "N": 3,
+  "default_leader": "cockpit",
+  "heartbeat_ms": 20,
+  "missed_heartbeats": 3,
+  "election_timeout_jitter_ms": 39,
+  "startup_grace_ms": 500,
+  "log_size": 30000,
+  "nodes": {"cockpit": 1, "steering": 2, "drivetrain": 3},
+  "Debug": true,
+  "append_heartbeat_ms": 100,
+  "event_period_ms": 1000,
+  "network_delay_us": 350,
+  "path_delay_us": [[0, 350, 350], [350, 0, 350], [350, 350, 0]],
+  "random_seed": 14
+}

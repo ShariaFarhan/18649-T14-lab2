@@ -25,6 +25,11 @@
 
 #include "../shared/lab3_can_rx.h"
 #include "lab3_can_catalog.h"  //for can bus and layout info 
+#ifdef LAB5_ENABLED
+#include "lab5_agent.h"
+#include <pthread.h>
+static bool lab5_enabled;
+#endif
 
 // ------------------------------ CONFIG ---------------------------------- 
 
@@ -113,8 +118,13 @@
 #define TP_DEG_A            4
 #define TP_DEG_B            5
 #define TP_ERR              6
+#ifdef LAB5_ENABLED
+#define TP_COUNT 13
+static const unsigned TP_PIN[TP_COUNT]={23,17,27,22,5,6,13,12,16,20,21,26,19};
+#else
 #define TP_COUNT            7
 static const unsigned TP_PIN[TP_COUNT] = { 23, 17, 27, 22, 5, 6, 13 };
+#endif
 
 // ------------------------- WIRE FORMATS --------------------------------- 
 
@@ -159,6 +169,9 @@ typedef struct {
     int      fd;                 // line-request fd from the GPIO chip 
     char     chip[PATH_MAX];
     bool     level[TP_COUNT];
+#ifdef LAB5_ENABLED
+    pthread_mutex_t lock;
+#endif
 } test_points_t;
 
 typedef struct {
@@ -207,6 +220,9 @@ typedef struct {
     uint8_t  blink_sel, btn_prev, blink_mode;
     bool     turn_crossed, btn_synced, blink_on, blink_pending, blink_restart;
     double   btn_last[2], blink_next_edge, blink_last_tx;
+#ifdef LAB5_ENABLED
+    uint32_t lab5_blink_epoch_ms;
+#endif
 
     // CAN transmit: one 4-bit sequence counter per ID 
     bool     have_tx;
@@ -309,6 +325,10 @@ static int test_points_open(test_points_t *tp)
     char seen[16][PATH_MAX];
     int seen_count = 0;
 
+    int count=TP_COUNT;
+#ifdef LAB5_ENABLED
+    if(!lab5_enabled)count=7;
+#endif
     tp->fd = -1;
     for (int i = 0; i < 16; i++) {
         char path[32], real[PATH_MAX];
@@ -329,7 +349,7 @@ static int test_points_open(test_points_t *tp)
         bool match = ioctl(chip, GPIO_GET_CHIPINFO_IOCTL, &info) == 0 && info.lines > 24 &&
                      (strncmp(info.label, "pinctrl-rp1", 11) == 0 ||
                       strncmp(info.label, "pinctrl-bcm", 11) == 0);
-        for (int p = 0; match && p < TP_COUNT; p++) {
+        for (int p = 0; match && p < count; p++) {
             struct gpio_v2_line_info line;
             char want[16];
             memset(&line, 0, sizeof(line));
@@ -344,14 +364,14 @@ static int test_points_open(test_points_t *tp)
         //another chip if these lines are busy. 
         struct gpio_v2_line_request req;
         memset(&req, 0, sizeof(req));
-        for (int p = 0; p < TP_COUNT; p++) req.offsets[p] = TP_PIN[p];
-        req.num_lines = TP_COUNT;
+        for (int p = 0; p < count; p++) req.offsets[p] = TP_PIN[p];
+        req.num_lines = count;
         snprintf(req.consumer, sizeof(req.consumer), "lab3-test-points");
         req.config.flags = GPIO_V2_LINE_FLAG_OUTPUT;
         req.config.num_attrs = 1;
         req.config.attrs[0].attr.id = GPIO_V2_LINE_ATTR_ID_OUTPUT_VALUES;
         req.config.attrs[0].attr.values = 0;
-        req.config.attrs[0].mask = (1ULL << TP_COUNT) - 1;
+        req.config.attrs[0].mask = (1ULL << count) - 1;
         int rc = ioctl(chip, GPIO_V2_GET_LINE_IOCTL, &req);
         int saved = errno;
         close(chip);
@@ -368,7 +388,7 @@ static int test_points_open(test_points_t *tp)
     return -1;
 }
 
-static void test_points_toggle(test_points_t *tp, int which)
+static void test_points_toggle_unlocked(test_points_t *tp, int which)
 {
     tp->level[which] = !tp->level[which];
     if (!tp->enabled) return;
@@ -378,12 +398,35 @@ static void test_points_toggle(test_points_t *tp, int which)
     if (ioctl(tp->fd, GPIO_V2_LINE_SET_VALUES_IOCTL, &v) != 0)
         perror("test point write");
 }
+static void test_points_toggle(test_points_t *tp,int which)
+{
+#ifdef LAB5_ENABLED
+    if(lab5_enabled)pthread_mutex_lock(&tp->lock);
+#endif
+    test_points_toggle_unlocked(tp,which);
+#ifdef LAB5_ENABLED
+    if(lab5_enabled)pthread_mutex_unlock(&tp->lock);
+#endif
+}
 
 //LEDs are set to a level instead of toggled
 static void test_points_set(test_points_t *tp, int which, bool level)
 {
-    if (tp->level[which] != level) test_points_toggle(tp, which);
+#ifdef LAB5_ENABLED
+    if(lab5_enabled)pthread_mutex_lock(&tp->lock);
+#endif
+    if (tp->level[which] != level) test_points_toggle_unlocked(tp, which);
+#ifdef LAB5_ENABLED
+    if(lab5_enabled)pthread_mutex_unlock(&tp->lock);
+#endif
 }
+#ifdef LAB5_ENABLED
+static void lab5_pin(void *context,enum l5_pi_pin pin,bool level)
+{
+    if(pin==L5_PI_CAN_TX_A||pin==L5_PI_CAN_TX_B)test_points_toggle(context,pin==L5_PI_CAN_TX_A?TP_CAN_TX_A:TP_CAN_TX_B);
+    else test_points_set(context,7+(int)pin,level);
+}
+#endif
 
 static void test_points_close(test_points_t *tp)
 {
@@ -427,7 +470,12 @@ static int can_open(const char *ifname)
 static unsigned tx_queued[2], tx_failed[2];
 static void can_send_both(const int can_fd[2], test_points_t *tp, const struct can_frame *f)
 {
+    unsigned route=3;
+#ifdef LAB5_ENABLED
+    if(lab5_enabled){struct l5_snapshot snapshot=lab5_pi_snapshot();route=l5_snapshot_route(&snapshot,0);}
+#endif
     for (int b = 0; b < 2; b++) {
+        if(!(route&(1u<<b)))continue;
         if (write(can_fd[b], f, sizeof(*f)) == (ssize_t)sizeof(*f)) {
             ++tx_queued[b];test_points_toggle(tp,b==0 ? TP_CAN_TX_A : TP_CAN_TX_B);
             //CMD_TX ends the Pi stage (measurement #1): right after the first CAN write returns
@@ -493,6 +541,12 @@ static void build_blink_frame(struct can_frame *f, const state_t *s)
     f->data[CAN_B0] = can_byte0(s->blink_seq, s->error ? CAN_FLAG_SYS_ERROR : 0);
     f->data[BLINK_MODE] = s->blink_mode;
     f->data[BLINK_PHASE] = s->blink_on ? 1 : 0;
+#ifdef LAB5_ENABLED
+    if(lab5_enabled){
+        for(unsigned i=0;i<4;i++)f->data[3+i]=s->lab5_blink_epoch_ms>>(8*i);
+        f->data[7]=0xa5;
+    }
+#endif
 }
 
 // Lab 3: FAULT (0x020), sent once when the cockpit itself fails. 
@@ -583,6 +637,13 @@ static void blinker_set_output(state_t *s, uint8_t mode, double now)
 {
     if (mode == s->blink_mode && s->blink_next_edge > 0) return;
     s->blink_mode = mode;
+#ifdef LAB5_ENABLED
+    if(lab5_enabled){
+        struct l5_snapshot snapshot=lab5_pi_snapshot();
+        uint64_t global=l5_global_gettime(&snapshot.clock,(uint64_t)(now*1000000));
+        s->lab5_blink_epoch_ms=(uint32_t)(global/1000+20);
+    }
+#endif
     s->blink_on = mode != BLINK_MODE_OFF;
     s->blink_next_edge = now + blink_step(mode);
     s->blink_pending = true;
@@ -592,6 +653,15 @@ static void blinker_set_output(state_t *s, uint8_t mode, double now)
 // Advance the blinkers edges on a fixed grid. Returns true when a BLINK frame is due. 
 static bool blinker_due(state_t *s, double now)
 {
+#ifdef LAB5_ENABLED
+    if(lab5_enabled){
+        struct l5_snapshot snapshot=lab5_pi_snapshot();
+        uint64_t global=l5_global_gettime(&snapshot.clock,(uint64_t)(now*1000000));
+        bool phase=l5_blink_phase(global,s->blink_mode,s->lab5_blink_epoch_ms,l5_hazard_half_us(&snapshot));
+        if(phase!=s->blink_on||now-s->blink_last_tx>=BLINK_KEEPALIVE_S){s->blink_on=phase;s->blink_pending=true;}
+        return s->blink_pending&&now-s->blink_last_tx>=BLINK_MIN_GAP_S;
+    }
+#endif
     if (s->blink_next_edge > 0 && now >= s->blink_next_edge) {
         double step = blink_step(s->blink_mode);
         long edges = 1 + (long)((now - s->blink_next_edge) / step);
@@ -677,6 +747,13 @@ static void zone_state_update(state_t *s, double now)
     s->isolated=health.isolated;
     s->degraded[0]=!!(health.degraded & HB_BUS_A_DEGRADED);
     s->degraded[1]=!!(health.degraded & HB_BUS_B_DEGRADED);
+#ifdef LAB5_ENABLED
+    if(lab5_enabled){
+        struct l5_snapshot snapshot=lab5_pi_snapshot();
+        s->degraded[0]=!!(snapshot.bus_degraded&1);s->degraded[1]=!!(snapshot.bus_degraded&2);
+        s->isolated=snapshot.bus_degraded==3;
+    }
+#endif
 
     bool wheel_ok = wheel_fresh(s, now);
     bool n2 = n2_fresh(s, now), n3 = heartbeat_fresh(s, now);
@@ -689,6 +766,15 @@ static void zone_state_update(state_t *s, double now)
     if (s->cockpit_failed)  reason = "SELF_TEST";
     else if (!wheel_ok)     reason = "UDP_LOST";
     else if (s->isolated)   reason = "ISOLATED";
+#ifdef LAB5_ENABLED
+    else if(lab5_enabled){
+        struct l5_snapshot snapshot=lab5_pi_snapshot();
+        if(snapshot.fatal)reason="RAFT_STORAGE";
+        else if(!snapshot.cockpit_ok)reason="RAFT_NETWORK_STATE";
+        else if(fault_rx)reason="FAULT_RX";
+        else if(zone_fault)reason="ZONE_FAULT";
+    }
+#endif
     else if (!n2 || !n3)    reason = !s->booted ? "STARTUP" : !n2 ? "N2_LOST" : "N3_LOST";
     else if (fault_rx)      reason = "FAULT_RX";
     else if (zone_fault)    reason = "ZONE_FAULT";
@@ -827,6 +913,9 @@ static void usage(const char *prog)
         "  --ctrl-blink-only     CTRL and synchronized lights; no motor-enable or force-feedback request\n"
         "  --lab3-demo           scope outputs plus dummy FORCE UDP telemetry (no motor-arm bit)\n"
         "  --control-socket PATH local 0600 Unix socket for bad-input on/off\n"
+#ifdef LAB5_ENABLED
+        "  --lab5-log PATH       enable Lab5 with a persistent log file (parent directory must exist)\n"
+#endif
         "  --quiet               no periodic status line\n"
         "  --no-test-points      run without markers/DEG/ERR (GPIO 23,17,27,22,5,6,13)\n",
         prog, UDP_PORT, IN_STEER_LEFT, IN_STEER_CENTER, IN_STEER_RIGHT,
@@ -850,6 +939,9 @@ int main(int argc, char **argv)
     bool use_test_points = true, quiet = false, heartbeat_only = false, ctrl_blink_only = false;
     bool demo_feedback=false;
     const char *control_path=NULL;
+#ifdef LAB5_ENABLED
+    const char *lab5_log=NULL;
+#endif
     calibration_t cal = {
         IN_STEER_LEFT, IN_STEER_CENTER, IN_STEER_RIGHT,
         IN_PEDAL_RELEASED, IN_PEDAL_PRESSED, IN_PEDAL_RELEASED, IN_PEDAL_PRESSED,
@@ -871,6 +963,9 @@ int main(int argc, char **argv)
         { "ctrl-blink-only", no_argument, NULL, 'C' },
         { "lab3-demo", no_argument, NULL, 'D' },
         { "control-socket", required_argument, NULL, 'U' },
+#ifdef LAB5_ENABLED
+        { "lab5-log",required_argument,NULL,'5' },
+#endif
         { "quiet", no_argument, NULL, 'q' },
         { "no-test-points", no_argument, NULL, 'n' },
         { "help", no_argument, NULL, 'h' },
@@ -894,6 +989,9 @@ int main(int argc, char **argv)
         case 'C': ctrl_blink_only = true; break;
         case 'D': ctrl_blink_only=true;demo_feedback=true;break;
         case 'U': control_path=optarg;break;
+#ifdef LAB5_ENABLED
+        case '5':lab5_log=optarg;lab5_enabled=true;ctrl_blink_only=true;demo_feedback=true;break;
+#endif
         case 'q': quiet = true; break;
         case 'n': use_test_points = false; break;
         default: usage(argv[0]); return opt == 'h' ? 0 : 2;
@@ -924,6 +1022,9 @@ int main(int argc, char **argv)
 
     test_points_t tp;
     memset(&tp, 0, sizeof(tp));
+#ifdef LAB5_ENABLED
+    pthread_mutex_init(&tp.lock,NULL);
+#endif
     tp.fd = -1;
     tp.enabled = use_test_points;
     if (tp.enabled && test_points_open(&tp) != 0) {
@@ -952,6 +1053,13 @@ int main(int argc, char **argv)
         perror("control socket bind (remove only a confirmed stale socket)");
         close(udp_fd);close(can_fd[0]);close(can_fd[1]);test_points_close(&tp);return 1;
     }
+#ifdef LAB5_ENABLED
+    if(lab5_enabled && lab5_pi_start(lab5_log,can_if[0],can_if[1],&tp,lab5_pin)){
+        fprintf(stderr,"Lab5 initialization failed\n");
+        if(control_fd>=0){close(control_fd);unlink(control_path);}
+        close(udp_fd);close(can_fd[0]);close(can_fd[1]);test_points_close(&tp);return 1;
+    }
+#endif
 
     // Keyboard commands are read only when this program owns the terminal. 
     bool stdin_open = !heartbeat_only &&
@@ -1132,11 +1240,17 @@ int main(int argc, char **argv)
 
         // ---- Pi -> STM32s: CTRL on a wheel update or the 20 ms deadline ---- 
         double now = now_s();
+#ifdef LAB5_ENABLED
+        if(lab5_enabled)lab5_pi_input(wheel_fresh(&s,now),s.cockpit_failed,s.error);
+#endif
         if (ctrl_blink_only) s.drive_enable=false;
         else drive_enable_update(&s, now);
         if (send_update || now >= next_send) {
             if (!s.cockpit_failed) {                 // a failed zone is silent 
                 bool stale = !wheel_fresh(&s, now) || !heartbeat_fresh(&s, now);
+#ifdef LAB5_ENABLED
+                if(lab5_enabled)stale=!wheel_fresh(&s,now);
+#endif
                 struct can_frame frame;
                 build_command_frame(&frame, &s, stale);
                 can_send_both(can_fd, &tp, &frame);      // toggles CMD_TX after the CAN A write 
@@ -1172,7 +1286,11 @@ int main(int argc, char **argv)
 
         // ---- HB_N1 every 20 ms while the wheel stream is fresh ---- 
         if (now >= next_hb) {
-            if ((wheel_fresh(&s, now) || (ctrl_blink_only && !s.have_rx)) && !s.cockpit_failed) {
+            bool heartbeat_allowed=wheel_fresh(&s,now)||(ctrl_blink_only&&!s.have_rx);
+#ifdef LAB5_ENABLED
+            if(lab5_enabled)heartbeat_allowed=true;
+#endif
+            if (heartbeat_allowed && !s.cockpit_failed) {
                 struct can_frame hbf;
                 build_heartbeat_frame(&hbf, &s);
                 can_send_both(can_fd, &tp, &hbf);
@@ -1207,6 +1325,9 @@ int main(int argc, char **argv)
     close(can_fd[0]);
     close(can_fd[1]);
     close(udp_fd);
+#ifdef LAB5_ENABLED
+    if(lab5_enabled)lab5_pi_stop();
+#endif
     if (control_fd>=0) { close(control_fd);unlink(control_path); }
     test_points_close(&tp);
     printf("Stopped.\n");

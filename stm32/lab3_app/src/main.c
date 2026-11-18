@@ -11,6 +11,9 @@
 #include "system_state.h"
 #include "runtime.h"
 #include "transport_gate.h"
+#ifdef LAB5_ENABLED
+#include "lab5_agent.h"
+#endif
 #if NODE_ID == 2
 #include "steer_task.h"
 #include "relay_task.h"
@@ -47,11 +50,17 @@ static struct lab3_health health;
 static bool leds_ready;
 static uint8_t led_bits = 255;
 static struct system_state system_status;
-static bool ctrl_seen, ctrl_stale = true, blink_seen, use_master_phase;
+static bool ctrl_seen, ctrl_stale = true, blink_seen;
+#ifndef LAB5_ENABLED
+static bool use_master_phase;
+#endif
 static uint64_t ctrl_at, blink_at, remote_fault_until;
 static int16_t steering;
 static uint8_t throttle, brake, ctrl_buttons, ctrl_flags;
 static uint8_t blink_mode, blink_phase, peer_state[3];
+#ifdef LAB5_ENABLED
+static uint32_t blink_epoch_ms;
+#endif
 static uint32_t ctrl_count, blink_count;
 static uint8_t pending_reason, fault_seq, fault_pending;
 static uint64_t fault_at;
@@ -77,8 +86,11 @@ static void dispatch_frame(const struct received *item, uint64_t now)
     lab3_rx_mark(item->bus); /* Every dispatch, including duplicate copies. */
     if (f->flags & (CAN_FRAME_IDE | CAN_FRAME_RTR)) return;
     enum lab3_rx_result result = lab3_receive(&rx,f->id,item->bus,f->data,f->dlc,now);
-#if NODE_ID == 2
+#if NODE_ID == 2 && !defined(LAB5_ENABLED)
     relay_task_observe(f,item->bus,result,now);
+#endif
+#ifdef LAB5_ENABLED
+    if(result!=LAB3_RX_INVALID&&result!=LAB3_RX_CONFLICT)lab5_board_legacy(item->bus,f,result==LAB3_RX_NEW);
 #endif
     if (result == LAB3_RX_INVALID && f->id == CAN_ID_CTRL) {
         system_state_bad_input(&system_status);
@@ -105,6 +117,10 @@ static void dispatch_frame(const struct received *item, uint64_t now)
     } else if (f->id==CAN_ID_BLINK) {
         blink_mode=f->data[BLINK_MODE]; blink_phase=f->data[BLINK_PHASE];
         blink_seen=true; blink_at=now; ++blink_count;
+#ifdef LAB5_ENABLED
+        blink_epoch_ms=0;
+        if(f->data[7]==0xa5)for(unsigned i=0;i<4;i++)blink_epoch_ms|=(uint32_t)f->data[3+i]<<(8*i);
+#endif
     } else if (f->id==CAN_ID_FAULT && f->data[FAULT_ZONE]!=NODE_ID) {
         remote_fault_until=now+100;
     }
@@ -112,6 +128,9 @@ static void dispatch_frame(const struct received *item, uint64_t now)
 
 static void update_control_and_lights(uint64_t now)
 {
+#ifdef LAB5_ENABLED
+    if(lab5_board_fault()&&!system_status.output_fault){system_state_output_failed(&system_status);pending_reason=FAULT_R_OUTPUT;}
+#endif
     if (lab3_runtime_failed() && !system_status.output_fault) {
         system_state_output_failed(&system_status);pending_reason=FAULT_R_OUTPUT;
     }
@@ -132,6 +151,10 @@ static void update_control_and_lights(uint64_t now)
             (lab3_hb_fresh(&rx,p,0,now)||lab3_hb_fresh(&rx,p,1,now))) peer_fault=true;
     system_status.link_ok=ctrl_seen && !ctrl_stale && now-ctrl_at<CTRL_TIMEOUT_MS &&
                           !health.missing_peers && !peer_fault && now>=remote_fault_until;
+#ifdef LAB5_ENABLED
+    struct l5_snapshot lab5=lab5_board_snapshot();
+    system_status.link_ok=ctrl_seen&&!ctrl_stale&&now-ctrl_at<CTRL_TIMEOUT_MS&&lab5.cockpit_ok&&!lab5.fatal&&!peer_fault;
+#endif
     enum system_reason reason=system_state_reason(&system_status);
     lab3_err(reason!=SYS_OK);
 #if NODE_ID == 2
@@ -139,6 +162,9 @@ static void update_control_and_lights(uint64_t now)
 #else
     drive_task_submit(throttle,brake,reason==SYS_OK,ctrl_count);
 #endif
+#ifdef LAB5_ENABLED
+    lab5_board_lights(blink_mode,reason!=SYS_OK,blink_epoch_ms);
+#else
     bool fresh_blink=blink_seen && now-blink_at<BLINK_TIMEOUT_MS;
     bool master_live=lab3_hb_fresh(&rx,0,0,now)||lab3_hb_fresh(&rx,0,1,now);
     bool follow_master=lab3_follow_master(fresh_blink,master_live,reason==SYS_OK,blink_mode);
@@ -160,11 +186,16 @@ static void update_control_and_lights(uint64_t now)
         use_master_phase=false;
     }
     if (rc) { system_state_output_failed(&system_status); pending_reason=FAULT_R_OUTPUT; }
+#endif
 }
 
 static void update_health(uint64_t now)
 {
     health = lab3_health_get(&rx, NODE_ID - 1, now);
+#ifdef LAB5_ENABLED
+    struct l5_snapshot link_state=lab5_board_snapshot();
+    health.degraded=link_state.bus_degraded;health.isolated=health.degraded==3;
+#endif
     for (unsigned b = 0; b < 2; ++b) {
         k_mutex_lock(&buses[b].tx_gate,K_FOREVER);
         bool degraded=!buses[b].ready || buses[b].tx_stalled ||
@@ -195,6 +226,9 @@ static void queue_marked(void *arg)
 { lab3_tx_mark(((struct bus *)arg)->index); }
 static int node_send(unsigned bus,const struct can_frame *frame)
 {
+#ifdef LAB5_ENABLED
+    if(!l5_wire_id(frame->id)&&!(lab5_board_route()&(1u<<bus)))return 0;
+#endif
     struct bus *b=&buses[bus];
     return lab3_transport_send(&b->tx_gate,b->dev,&b->ready,frame,frame_allowed,tx_done,b,queue_marked);
 }
@@ -211,7 +245,7 @@ static void abort_local_tx(void)
         k_mutex_unlock(&b->tx_gate);
     }
 }
-#if NODE_ID == 2
+#if NODE_ID == 2 && !defined(LAB5_ENABLED)
 static int relay_send(unsigned bus,const struct can_frame *frame)
 {
     /* Include relay completions in bus progress so recovery does not mistake
@@ -223,6 +257,9 @@ static void receive(const struct device *dev, struct can_frame *frame, void *arg
 {
     ARG_UNUSED(dev);
     struct bus *b = arg;
+#ifdef LAB5_ENABLED
+    if(lab5_board_capture(b->index,frame))return;
+#endif
     struct received item = {.frame = *frame, .bus = b->index};
     if (k_msgq_put(&received_q, &item, K_NO_WAIT)) atomic_inc(&b->dropped);
 }
@@ -332,6 +369,12 @@ int main(void)
         }
         int rc = can_set_mode(bus->dev, CAN_MODE_NORMAL);
         if (!rc) rc = can_set_bitrate(bus->dev, 500000);
+#ifdef LAB5_ENABLED
+        const struct can_filter filters[]={{.id=0,.mask=0x400},{.id=0x500,.mask=0x700}};
+        for(unsigned i=0;!rc&&i<ARRAY_SIZE(filters);i++){
+            int filter=can_add_rx_filter(bus->dev,receive,bus,&filters[i]);if(filter<0)rc=filter;
+        }
+#else
         for (unsigned p = 0; !rc && p < 3; ++p) {
             struct can_filter f = {.id = CAN_ID_HB_N1 + p, .mask = CAN_STD_ID_MASK};
             int filter = can_add_rx_filter(bus->dev, receive, bus, &f);
@@ -343,6 +386,7 @@ int main(void)
             int filter=can_add_rx_filter(bus->dev,receive,bus,&f);
             if (filter<0) rc=filter;
         }
+#endif
         if (!rc) rc = can_start(bus->dev);
         bus->ready = rc == 0;
         bus->controller_state = bus->ready ? CAN_STATE_ERROR_ACTIVE : CAN_STATE_STOPPED;
@@ -351,16 +395,29 @@ int main(void)
         printk("CAN_%c init=%d\n", 'A' + b, rc);
     }
 #if NODE_ID == 2
+#ifndef LAB5_ENABLED
     int relay_rc=relay_task_init(relay_send);
     if (relay_rc) { system_state_output_failed(&system_status);pending_reason=FAULT_R_OUTPUT; }
     printk("RELAY: N2 only, original payload, priority 4, D6 marker; init=%d\n",relay_rc);
+#endif
     force_task_init(node_send);
+#endif
+#ifdef LAB5_ENABLED
+    int lab5_rc=lab5_board_init(node_send);
+    if(lab5_rc){system_state_output_failed(&system_status);pending_reason=FAULT_R_OUTPUT;}
+    printk("LAB5 consensus/global-time initialization=%d\n",lab5_rc);
 #endif
     uint32_t workers=BIT(WORK_MAIN)|BIT(WORK_CONTROL)|BIT(WORK_BUTTON);
 #if NODE_ID == 2
-    workers|=BIT(WORK_RELAY)|BIT(WORK_FORCE);
+    workers|=BIT(WORK_FORCE);
+#ifndef LAB5_ENABLED
+    workers|=BIT(WORK_RELAY);
+#endif
 #else
     workers|=BIT(WORK_PID);
+#endif
+#ifdef LAB5_ENABLED
+    workers|=BIT(WORK_LAB5)|BIT(WORK_CLOCK);
 #endif
     int watchdog_rc=lab3_watchdog_start(workers);
     if (watchdog_rc) { system_state_output_failed(&system_status);pending_reason=FAULT_R_OUTPUT; }
@@ -433,10 +490,12 @@ int main(void)
                 system_reason_name(system_state_reason(&system_status)),blink_count,blink_mode,blink_phase);
 #if NODE_ID == 2
             printk("  SRV pulse_us=%u output_fault=%d\n",steer_task_pulse_us(),steer_task_failed());
+#ifndef LAB5_ENABLED
             struct relay_stats relay=relay_task_stats();
             printk("  RELAY queued_to_A/B=%u/%u failed=%u/%u offered=%u suppressed=%u superseded=%u expired=%u\n",
                 relay.queued[0],relay.queued[1],relay.failed[0],relay.failed[1],
                 relay.offered,relay.suppressed,relay.superseded,relay.expired);
+#endif
 #else
             struct lab3_drive_status drive=drive_task_status();
             struct test_point_counts points=test_points_counts();
