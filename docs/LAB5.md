@@ -159,7 +159,7 @@ The Windows wheel sender also runs from this checkout. Use the existing
 [Lab 5 signals](#added-signal-pins). Both buses run at 500 kbit/s.
 
 ```sh
-git clone --branch codex/lab5-time-consensus --single-branch https://github.com/ShariaFarhan/18649-T14-lab2.git
+git clone --branch lab5 --single-branch https://github.com/ShariaFarhan/18649-T14-lab2.git
 cd 18649-T14-lab2
 ```
 
