@@ -307,9 +307,21 @@ void l5_node_legacy(struct l5_node*n,unsigned bus,uint16_t id,const uint8_t*d,bo
     if(!fresh||source<1||source>3||source==n->raft.id)return;
     /* Lab5 liveness uses fresh REF/REF_ACK time, not delayed legacy HBs. */
     if(id==CAN_ID_FAULT&&d[FAULT_REASON]==FAULT_R_SELF_TEST){n->test_failures|=1u<<source;n->test_failed_at[source]=at;}
-    /* Bounded first-copy bootstrap forwarding. Application receive-side dedup
-     * prevents loops; every node can bridge when it is the remaining path. */
-    if(!n->failed&&!n->raft.fatal)wire_send(n,1u<<(bus^1),id,d);
+    /* Legacy frames retain their original CAN ID. Relay only when the third
+     * node needs a hop in the committed graph. Otherwise two bridges can send
+     * the same ID together, leaving no receiving node to ACK their frame.
+     * Consensus and clock discovery still use their distinct last-hop IDs. */
+    const struct l5_network *g=l5_get_network(&n->raft);
+    unsigned other=bus^1u;
+    if(!(g->nodes&(1u<<source))||!(g->nodes&(1u<<n->raft.id))||
+       !(g->links[source]&(1u<<bus))||!(g->links[n->raft.id]&(1u<<other)))return;
+    for(unsigned destination=1;destination<=3;destination++){
+        if(destination==source||destination==n->raft.id||!(g->nodes&(1u<<destination)))continue;
+        if((g->links[destination]&(1u<<other))&&!(g->links[source]&g->links[destination])){
+            if(!n->failed&&!n->raft.fatal)wire_send(n,1u<<other,id,d);
+            break;
+        }
+    }
 }
 void l5_node_snapshot(struct l5_node*n,struct l5_snapshot*s)
 {

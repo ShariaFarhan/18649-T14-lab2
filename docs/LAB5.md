@@ -14,6 +14,13 @@ traffic retain bounded duplicate-suppressed discovery forwarding on both
 buses, so agreeing on a changed route does not depend on already knowing it.
 All three nodes can forward in Lab5; this is not the old N2-only relay.
 
+Legacy CTRL/BLINK/HB/FORCE/FAULT frames keep their original CAN IDs. They are
+forwarded only when the committed graph shows that the third node needs a
+hop. Flooding those frames from multiple bridges can leave both remaining
+controllers transmitting the same ID, with no receiving node to acknowledge
+it. Consensus and clock discovery retain their separate last-hop IDs and do
+not depend on this application-forwarding decision.
+
 Implemented requirements:
 
 - Three fixed voters (majority=2), predefined cockpit leader on a fresh term1
@@ -313,6 +320,12 @@ page-write model reproduces43 failures without barriers and zero committed-prefi
 losses across180 crash cut points with the publication barriers.
 The original Lab3 host regressions also pass. These are **not hardware timing
 measurements or a formal Raft proof**.
+
+The CAN arbitration regression additionally models simultaneous transmitters,
+retained controller TX slots, and the need for a non-transmitting ACK receiver.
+It checks 18 single-link and 36 ordered hop faults with each possible leader,
+including Front B followed by Pi A, plus restoration and continued CTRL
+delivery. This model does not validate electrical behavior or hardware timing.
 
 Still measure on hardware: PPS spread, FL/RL<=1 ms over ten edges,
 leader replacement<=1 s, Pi-loss fail-safe<=100 ms, handover edge disturbance
