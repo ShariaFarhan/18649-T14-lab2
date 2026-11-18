@@ -23,6 +23,7 @@ struct l5_epoch_evidence {
     bool valid;
 };
 struct l5_node {
+    uint64_t pulse_history[4];
     struct l5_agent raft;struct l5_wire wire;struct l5_clock clock;
     uint64_t now_us,peer_seen[4],bus_seen[2],next_report,next_event,boot_us;
     bool peer_known[4],bus_known[2],input_ok,failed;
@@ -32,7 +33,8 @@ struct l5_node {
     struct l5_epoch_evidence epochs[4];
     uint64_t probe_due[4],authority_local,authority_global,authority_until,activation_at;
     uint32_t authority_term,observed_term,authority_generation;
-    uint16_t nonce_boot,nonce_round;
+    uint32_t nonce_boot;
+    uint16_t nonce_round;
     uint8_t authority_leader,observed_leader;
     enum l5_role observed_role;
     bool time_ready,time_conflict;

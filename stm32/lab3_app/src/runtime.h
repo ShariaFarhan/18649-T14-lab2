@@ -13,6 +13,9 @@ void lab3_tx_mark(unsigned bus);
 void lab3_progress(enum lab3_worker worker);
 int lab3_watchdog_start(uint32_t required_mask);
 void lab3_watchdog_poll(void);
+#if defined(LAB5_ENABLED) && NODE_ID == 3
+void lab5_report_rear_reset(void);
+#endif
 void lab3_profile_begin(enum lab3_profile task);
 void lab3_profile_end(enum lab3_profile task);
 #endif

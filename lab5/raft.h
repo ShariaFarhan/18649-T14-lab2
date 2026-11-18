@@ -3,6 +3,8 @@
 #include "config.h"
 #include "network.h"
 enum l5_role { L5_FOLLOWER,L5_PRE_CANDIDATE,L5_CANDIDATE,L5_LEADER };
+#define L5_LEADER_PING 12u
+#define L5_LEADER_PONG 13u
 enum l5_rpc { L5_PREVOTE=1,L5_PREVOTE_REPLY,L5_VOTE,L5_VOTE_REPLY,
               L5_APPEND,L5_APPEND_REPLY,L5_CLIENT,L5_CLIENT_REPLY,L5_REF_ACK,L5_TIME_QUERY,L5_TIME_REPLY };
 struct l5_entry { uint32_t term,index,event; };
@@ -49,7 +51,8 @@ void l5_tick(struct l5_agent *,uint64_t now_ms);
 void l5_receive(struct l5_agent *,const struct l5_message *,uint64_t now_ms);
 bool l5_receive_reference(struct l5_agent *,unsigned leader,uint8_t term_low,uint8_t cycle,uint64_t now_ms,uint64_t reference_time);
 bool l5_client_submit(struct l5_agent *,unsigned kind,unsigned node,unsigned bus,uint64_t now_ms);
-bool l5_reserve_id(struct l5_agent *,uint16_t *id);
+bool l5_reserve_id(struct l5_agent *,uint32_t *id);
 void l5_pause(struct l5_agent *,bool paused,uint64_t now_ms);
+void l5_confirm_contact(struct l5_agent *,unsigned peer,bool peer_is_leader,uint64_t sent_ms);
 const struct l5_network *l5_get_network(const struct l5_agent *);
 #endif

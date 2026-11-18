@@ -168,4 +168,17 @@ static void crash_and_loss_test(void)
     }
     puts("PASS Raft fault schedules: loss, duplicate/reordered RPCs, repeated crash/restart, committed-prefix agreement");
 }
-int main(void){cluster_test();storage_test();time_test();random_test();crash_and_loss_test();}
+static void exhausted_legacy_reservation(void)
+{
+    struct l5_config cfg=L5_DEFAULT_CONFIG;
+    stores[3]=(struct memstore){.meta={.term=2379,.client_seq=65535}};
+    boot(3,cfg);
+    uint32_t id;
+    assert(l5_reserve_id(&agents[3],&id)&&id==65536);
+    uint32_t event=l5_event(L5_EVENT,3,0,3,id);
+    assert(l5_event_valid(event)&&l5_request(event)==65536);
+    boot(3,cfg);
+    assert(l5_reserve_id(&agents[3],&id)&&id>65536);
+    puts("PASS legacy request watermark 65535: reboot reserves distinct full-width IDs");
+}
+int main(void){cluster_test();storage_test();time_test();random_test();crash_and_loss_test();exhausted_legacy_reservation();}

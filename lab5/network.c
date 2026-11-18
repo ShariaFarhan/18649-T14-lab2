@@ -3,7 +3,7 @@
 bool l5_event_valid(uint32_t e)
 {
     unsigned k=l5_kind(e),n=l5_node(e);
-    if ((e>>25) || k>L5_EVENT) return false;
+    if (k>L5_EVENT) return false;
     if (k==L5_NOOP) return e==0;
     if((k==L5_COCKPIT_OK||k==L5_COCKPIT_ERROR)&&(n!=1||l5_bus(e)!=0))return false;
     if((k==L5_NODE_UP||k==L5_NODE_DOWN)&&l5_bus(e)!=0)return false;

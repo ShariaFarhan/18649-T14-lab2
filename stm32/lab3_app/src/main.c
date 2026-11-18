@@ -227,7 +227,7 @@ static void queue_marked(void *arg)
 static int node_send(unsigned bus,const struct can_frame *frame)
 {
 #ifdef LAB5_ENABLED
-    if(!l5_wire_id(frame->id)&&!(lab5_board_route()&(1u<<bus)))return 0;
+    if(frame->id!=CAN_ID_HB_N1+NODE_ID-1&&!l5_wire_id(frame->id)&&!(lab5_board_route()&(1u<<bus)))return 0;
 #endif
     struct bus *b=&buses[bus];
     return lab3_transport_send(&b->tx_gate,b->dev,&b->ready,frame,frame_allowed,tx_done,b,queue_marked);
@@ -342,6 +342,9 @@ static void send_pending_fault(uint64_t now)
 }
 int main(void)
 {
+#if defined(LAB5_ENABLED) && NODE_ID == 3
+    lab5_report_rear_reset();
+#endif
     printk("\nLAB3 CTRL + BLINK N%d; left D14/right D15\n", NODE_ID);
     for (unsigned b=0;b<ARRAY_SIZE(buses);b++) k_mutex_init(&buses[b].tx_gate);
     int runtime_rc=lab3_runtime_init(local_button_action);
@@ -370,7 +373,9 @@ int main(void)
         int rc = can_set_mode(bus->dev, CAN_MODE_NORMAL);
         if (!rc) rc = can_set_bitrate(bus->dev, 500000);
 #ifdef LAB5_ENABLED
-        const struct can_filter filters[]={{.id=0,.mask=0x400},{.id=0x500,.mask=0x700}};
+        /* 0x400..0x47f carry compact VoteReply/AppendReply; candidates
+         * cannot see a granted majority if this hardware filter skips them. */
+        const struct can_filter filters[]={{.id=0,.mask=0x400},{.id=0x400,.mask=0x600}};
         for(unsigned i=0;!rc&&i<ARRAY_SIZE(filters);i++){
             int filter=can_add_rx_filter(bus->dev,receive,bus,&filters[i]);if(filter<0)rc=filter;
         }

@@ -35,8 +35,8 @@ Implemented requirements:
   EVENT once a second for the held-events/replay demonstration. This event's
   counter is a demonstration value, not a new sensor requirement.
 - A newly elected node first obtains a shared epoch if it lacks a recent
-  synchronized holdover. While `time_pending=1`, APPEND runs every20 ms to
-  maintain consensus, but REF/LEADER/SYNC do not claim a valid time master.
+  synchronized holdover. While `time_pending=1`, the one-frame consensus
+  heartbeat runs every 20 ms. REF/LEADER/SYNC wait for a valid time master.
 - Leader is time master. Followers compensate the configured hop delay and
   relay residence time, estimate relative drift and expose
   `l5_global_gettime()`. Zephyr followers update CLOCK_REALTIME; scheduling and
@@ -129,7 +129,7 @@ This stores30000 entries without consuming30000 entries of MCU RAM. Persistent
 client IDs are reserved in blocks to avoid a metadata write per generated
 event. This implementation fails closed on capacity exhaustion; it does not
 silently overwrite committed history. Embedded log terms are limited to65534
-and a node's reserved client request IDs to65535; these are explicit finite
+and a node's reserved client request IDs to8388607; these are explicit finite
 storage-format limits.
 
 **Do not flash this as if it used the previous full-Flash layout.** First use
@@ -221,17 +221,26 @@ byte7 is0xA5. Receivers compute phase from global time rather than from arrival.
 - REF_ACK ID=`0x080 + origin*16 + destination*4 + last_hop`; bytes: term16
   and echoed reference-time48. Fresh time is checked before
   refreshing liveness; delayed legacy heartbeats do not revive a failed node.
-- RPC ID=`0x500 + (type-1)*16 + last_hop`, type1..8: PRE_VOTE,
-  PRE_VOTE_REPLY, REQ_VOTE, VOTE_REPLY, APPEND, APPEND_REPLY, CLIENT,
-  CLIENT_REPLY.
-- TIME_QUERY/TIME_PROOF use base`0x140`/`0x180` plus
+- Every heartbeat period the elected leader broadcasts a monotonic cookie
+  (base 0x030); followers echo it (base 0x060). These use term16 and cookie48
+  and IDs include source*4 + last_hop. The leader accepts a recent echo of
+  one of its own last four cookies. This maintains quorum while acquiring
+  time or catching up a log without asserting clock synchronization.
+- PRE_VOTE, PRE_VOTE_REPLY, VOTE, VOTE_REPLY and APPEND_REPLY use the compact
+  ID range 0x340..0x47f. Each fits one frame (term16, index16, previous-term
+  or rejected previous-index16, status8, transaction8). APPEND, CLIENT and
+  CLIENT_REPLY still use RPC ID `0x500 + (type-1)*16 + last_hop`.
+- Front and Rear broadcast one diagnostic frame per second at 0x02a/0x02b.
+  It contains their local leader, flags (SYNC bit0, fatal bit1, time pending
+  bit2, degraded bus mask bits4..5), term16, commit16 and log-hash low16.
+- TIME_QUERY/TIME_PROOF use base`0x280`/`0x2c0` plus
   `origin*16 + destination*4 + last_hop`: term16, nonce32, flags8, reserved8.
   Flags:1=usable epoch,2=pristine startup,4=retained epoch. The compact proof
   has no usable epoch; it keeps clock acquisition from flooding bulk RPC queues.
-- TIME_REPLY (type11) uses six fragments at`0x1c0 + last_hop`, ahead of bulk
+- TIME_REPLY (type11) uses six fragments at`0x310 + last_hop`, ahead of bulk
   log traffic. Fields: index=nonce, event/aux=global-us low/high32,
   commit=holdover age-us, ok=epoch flags, term=matched request term.
-- TIME_SAMPLE uses base`0x0c0 + origin*16 + destination*4 + last_hop`:
+- TIME_SAMPLE uses base`0x240 + origin*16 + destination*4 + last_hop`:
   nonce32 and compensated global-us low32. It is accepted only with its matching
   TIME_REPLY. REF_ACK is also forwarded by a destination leader acting as bridge,
   so peers on opposite buses retain liveness evidence.

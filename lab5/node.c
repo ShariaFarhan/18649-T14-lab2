@@ -4,11 +4,12 @@
 static unsigned origin(uint16_t id,const uint8_t*d)
 {
     if(id>=L5_RPC_BASE)return (d[0]>>4)&3;
+    if(id>=L5_SHORT_BASE&&id<0x480)return (id>>4)&3;
     if(id>=L5_TIME_REPLY_BASE&&id<=L5_TIME_REPLY_BASE+3)return (d[0]>>4)&3;
-    if(id>=L5_QUERY_BASE&&id<L5_TIME_REPLY_BASE)return (id>>4)&3;
+    if(id>=L5_QUERY_BASE&&id<L5_PROOF_BASE+64)return (id>>4)&3;
     if(id>=L5_REF_BASE&&id<=0x4f)return (id-L5_REF_BASE)>>2;
     if(id>=L5_ACK_BASE&&id<=0xbf)return ((id-L5_ACK_BASE)>>4)&3;
-    if(id>=L5_SAMPLE_BASE&&id<=0xff)return ((id-L5_SAMPLE_BASE)>>4)&3;
+    if(id>=L5_SAMPLE_BASE&&id<L5_SAMPLE_BASE+64)return ((id-L5_SAMPLE_BASE)>>4)&3;
     if(id>=CAN_ID_HB_N1&&id<=CAN_ID_HB_N3)return id-CAN_ID_HB_N1+1;
     if(id==CAN_ID_CTRL||id==CAN_ID_BLINK)return 1;
     if(id==CAN_ID_FORCE)return 2;
@@ -25,6 +26,12 @@ unsigned l5_snapshot_route(const struct l5_snapshot*s,unsigned dest)
 static void wire_send(void*v,unsigned mask,uint16_t id,const uint8_t*d)
 {
     struct l5_node*n=v;if(n->failed||n->raft.fatal)return;
+    unsigned source=origin(id,d);
+    if(source>0&&source<=3&&source!=n->raft.id&&(mask==1||mask==2)){
+        unsigned bus=mask==1?0:1;
+        if(n->wire.direct_known[source][bus]&&n->now_us>=n->wire.direct_at[source][bus]&&
+           n->now_us-n->wire.direct_at[source][bus]<40000)return;
+    }
     n->send(n->context,mask,id,d,origin(id,d)!=n->raft.id);
 }
 static void send_rpc(void*v,const struct l5_message*m)
@@ -43,7 +50,7 @@ static void alive(struct l5_node*n,unsigned source,uint64_t at)
     n->peer_known[source]=true;
     if((n->test_failures&(1u<<source))&&at>=n->test_failed_at[source]&&at-n->test_failed_at[source]>=100000)n->test_failures&=~(1u<<source);
 }
-enum { EPOCH_VALID=1,EPOCH_PRISTINE=2,EPOCH_HELD=4 };
+enum { EPOCH_VALID=1,EPOCH_PRISTINE=2,EPOCH_HELD=4,CONTACT_ONLY=8,PEER_LEADER=16,PEER_FOLLOWS=32 };
 #define PROBE_WINDOW_US 150000u
 /* Nonces are durably reserved before use. The low half never wraps within a
  * reservation. Thus packets from a previous boot cannot authorize a clock. */
@@ -53,15 +60,15 @@ static void probe(struct l5_node*n,unsigned peer)
     struct l5_time_probe*p=&n->probes[peer];
     if(p->active&&n->now_us-p->sent<PROBE_WINDOW_US)return;
     if(n->now_us<n->probe_due[peer])return;
-    if(!n->nonce_boot||n->nonce_round==UINT16_MAX){
+    if(!n->nonce_boot||n->nonce_round==511){
         if(!l5_reserve_id(&n->raft,&n->nonce_boot)){n->raft.fatal=true;return;}
         n->nonce_round=0;
     }
-    *p=(struct l5_time_probe){.nonce=((uint32_t)n->nonce_boot<<16)|++n->nonce_round,
+    *p=(struct l5_time_probe){.nonce=(n->nonce_boot<<9)|++n->nonce_round,
         .term=n->raft.meta.term,.sent=n->now_us,.active=true,.generation=n->authority_generation};
     n->probe_due[peer]=n->now_us+30000;
     send_rpc(n,&(struct l5_message){.type=L5_TIME_QUERY,.source=n->raft.id,.destination=peer,
-        .term=p->term,.index=p->nonce});
+        .term=p->term,.index=p->nonce,.ok=n->raft.role==L5_LEADER&&n->time_ready?CONTACT_ONLY:0});
 }
 static void authority_state(struct l5_node*n)
 {
@@ -87,6 +94,10 @@ static void finish_probe(struct l5_node*n,unsigned source)
     if((p->flags&EPOCH_VALID)&&(elapsed>PROBE_WINDOW_US||p->at<p->sent))return;
     p->active=false;alive(n,source,p->sent); /* Causal proof, not receipt of arbitrary traffic. */
     if(p->term!=n->raft.meta.term||p->generation!=n->authority_generation)return;
+    if(n->now_us-p->sent<(uint64_t)n->raft.config.heartbeat_ms*n->raft.config.missed_heartbeats*1000 &&
+       (p->flags&(PEER_LEADER|PEER_FOLLOWS)))
+        l5_confirm_contact(&n->raft,source,!!(p->flags&PEER_LEADER),p->sent/1000);
+    if(p->flags&CONTACT_ONLY)return;
     struct l5_epoch_evidence*e=&n->epochs[source];
     *e=(struct l5_epoch_evidence){.global=p->raw+elapsed+p->delay,.local=p->at,
         .received=n->now_us,.age=p->age,.flags=p->flags,.valid=true};
@@ -124,7 +135,11 @@ static void activate_time(struct l5_node*n)
         n->time_conflict=false;
         int64_t delta=(int64_t)target-(int64_t)l5_global_gettime(&n->clock,n->now_us);
         if(n->clock.established&&(delta>100||delta< -100)){
-            l5_clock_verified_epoch(&n->clock,n->now_us,target,n->raft.id,n->raft.meta.term);return;
+            if(n->clock.last_ref<b->received||n->clock.leader!=n->raft.id){
+                l5_clock_verified_epoch(&n->clock,n->now_us,target,n->raft.id,n->raft.meta.term);
+                n->clock.recovering=true;
+            }
+            return;
         }
         if(!n->clock.established)l5_clock_verified_epoch(&n->clock,n->now_us,target,n->raft.id,n->raft.meta.term);
     }else{
@@ -140,6 +155,10 @@ static void activate_time(struct l5_node*n)
 static void send_reference(void*v,unsigned leader,uint32_t term,uint8_t cycle)
 {
     struct l5_node*n=v;authority_state(n);activate_time(n);
+    struct l5_message ping={.type=L5_LEADER_PING,.source=leader,.term=term,
+        .index=(uint32_t)n->now_us,.aux=(uint32_t)(n->now_us>>32)};
+    n->pulse_history[cycle%4]=n->now_us;
+    l5_wire_send(&n->wire,&ping,3);
     if(!n->time_ready)return;
     n->clock.last_ref=n->now_us;
     l5_wire_ref(&n->wire,term,cycle,l5_global_gettime(&n->clock,n->now_us));
@@ -148,18 +167,39 @@ static void send_reference(void*v,unsigned leader,uint32_t term,uint8_t cycle)
 static void message(void*v,const struct l5_message*m,uint64_t at)
 {
     struct l5_node*n=v;
+    if(m->type==L5_LEADER_PING||m->type==L5_LEADER_PONG){
+        if(n->raft.paused||n->raft.fatal||m->term!=n->raft.meta.term)return;
+        uint64_t stamp=((uint64_t)m->aux<<32)|m->index;
+        if(m->type==L5_LEADER_PING){
+            /* Only an already elected, known leader may renew its lease. */
+            if(n->raft.role!=L5_FOLLOWER||n->raft.leader!=m->source)return;
+            l5_confirm_contact(&n->raft,m->source,true,at/1000);alive(n,m->source,at);
+            struct l5_message pong=*m;pong.type=L5_LEADER_PONG;pong.source=n->raft.id;
+            l5_wire_send(&n->wire,&pong,3);
+        }else if(n->raft.role==L5_LEADER&&stamp<=n->now_us&&n->now_us-stamp<
+                 (uint64_t)n->raft.config.heartbeat_ms*n->raft.config.missed_heartbeats*1000){
+            for(unsigned i=0;i<4;i++)if(n->pulse_history[i]==stamp&&stamp){
+                l5_confirm_contact(&n->raft,m->source,false,stamp/1000);alive(n,m->source,stamp);break;
+            }
+        }
+        return;
+    }
     if(n->raft.config.debug&&n->trace)n->trace(n->context,m,false);
     if(m->type==L5_TIME_QUERY||m->type==L5_TIME_REPLY){
         if(m->destination!=n->raft.id||n->failed||n->raft.fatal)return;
         l5_receive(&n->raft,m,n->now_us/1000);authority_state(n);
         if(m->type==L5_TIME_QUERY){
             uint64_t stamp=l5_global_gettime(&n->clock,n->now_us);
-            bool epoch=m->term==n->raft.meta.term&&n->clock.established&&!n->clock.recovering;
+            bool same_term=m->term==n->raft.meta.term;
+            bool epoch=same_term&&!(m->ok&CONTACT_ONLY)&&n->clock.established&&!n->clock.recovering;
             uint64_t age=n->now_us-n->clock.last_ref;
             struct l5_message reply={.type=L5_TIME_REPLY,.source=n->raft.id,.destination=m->source,
                 .term=m->term,.index=m->index,
                 .ok=(epoch?EPOCH_VALID:0)|(n->clock.established?EPOCH_HELD:(n->raft.pristine_start?EPOCH_PRISTINE:0)),
                 .event=(uint32_t)stamp,.aux=(uint32_t)(stamp>>32),.commit=age>UINT32_MAX?UINT32_MAX:(uint32_t)age};
+            if(m->ok&CONTACT_ONLY)reply.ok=CONTACT_ONLY;
+            if(same_term&&n->raft.role==L5_LEADER)reply.ok|=PEER_LEADER;
+            if(same_term&&n->raft.role==L5_FOLLOWER&&n->raft.leader==m->source)reply.ok|=PEER_FOLLOWS;
             send_rpc(n,&reply);if(epoch)l5_wire_sample(&n->wire,m->source,m->index,stamp);
         }else{
             struct l5_time_probe*p=&n->probes[m->source];
@@ -227,7 +267,8 @@ void l5_node_tick(struct l5_node*n,uint64_t now,bool failed,bool input_ok)
     for(unsigned p=1;p<=3;p++)if(p!=n->raft.id){
         bool stale=!n->peer_known[p]||now-n->peer_seen[p]>=30000;
         bool recovery=p==n->raft.leader&&(!n->clock.established||n->clock.recovering)&&now+250000>=n->authority_until;
-        if(stale||recovery||n->raft.time_pending)probe(n,p);
+        bool quorum_probe=n->raft.role==L5_LEADER&&now/1000-n->raft.last_ack[p]>=25;
+        if(stale||recovery||quorum_probe||n->raft.time_pending)probe(n,p);
     }
     if(now>=n->next_report){
         const struct l5_network*g=l5_get_network(&n->raft);
@@ -255,20 +296,20 @@ void l5_node_tick(struct l5_node*n,uint64_t now,bool failed,bool input_ok)
 void l5_node_receive(struct l5_node*n,unsigned bus,uint16_t id,const uint8_t*d,unsigned dlc,uint64_t at,uint64_t now)
 {
     n->now_us=now;
-    if(bus<2){n->bus_seen[bus]=at;n->bus_known[bus]=true;}
+    if(bus<2&&(!n->bus_known[bus]||at>n->bus_seen[bus])){n->bus_seen[bus]=at;n->bus_known[bus]=true;}
     if(!n->failed)l5_wire_receive(&n->wire,bus,id,d,dlc,at,now);
 }
 void l5_node_legacy(struct l5_node*n,unsigned bus,uint16_t id,const uint8_t*d,bool fresh,uint64_t at)
 {
     if(bus>1)return;
-    n->bus_seen[bus]=at;n->bus_known[bus]=true;
+    if(!n->bus_known[bus]||at>n->bus_seen[bus]){n->bus_seen[bus]=at;n->bus_known[bus]=true;}
     unsigned source=origin(id,d);
     if(!fresh||source<1||source>3||source==n->raft.id)return;
     /* Lab5 liveness uses fresh REF/REF_ACK time, not delayed legacy HBs. */
     if(id==CAN_ID_FAULT&&d[FAULT_REASON]==FAULT_R_SELF_TEST){n->test_failures|=1u<<source;n->test_failed_at[source]=at;}
     /* Bounded first-copy bootstrap forwarding. Application receive-side dedup
      * prevents loops; every node can bridge when it is the remaining path. */
-    if(!n->failed&&!n->raft.fatal)n->send(n->context,1u<<(bus^1),id,d,true);
+    if(!n->failed&&!n->raft.fatal)wire_send(n,1u<<(bus^1),id,d);
 }
 void l5_node_snapshot(struct l5_node*n,struct l5_snapshot*s)
 {

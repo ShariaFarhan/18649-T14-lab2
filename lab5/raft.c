@@ -201,7 +201,9 @@ void l5_tick(struct l5_agent *r,uint64_t now)
         if(r->ever_quorum && available<2){follow(r,r->meta.term,0,now);return;}
         if(now>=r->next_ref){r->callbacks.reference(r->callbacks.context,r->id,r->meta.term,r->cycle++);
             r->next_ref=now+r->config.heartbeat_ms;}
-        if(now>=r->next_append){broadcast_append(r);r->next_append=now+(r->time_pending?r->config.heartbeat_ms:r->config.append_ms);}
+        /* The independent leader pulse maintains the heartbeat even before
+         * the clock is ready. Empty APPENDs must not saturate discovery. */
+        if(now>=r->next_append){broadcast_append(r);r->next_append=now+r->config.append_ms;}
     }else if(now>=r->election_due){
         bool waiting_default=r->config.default_leader && !r->leader_seen && r->meta.term==1 && now<r->startup_until;
         if(!waiting_default)prevote(r,now);
@@ -215,21 +217,21 @@ void l5_tick(struct l5_agent *r,uint64_t now)
 }
 bool l5_client_submit(struct l5_agent *r,unsigned kind,unsigned node,unsigned bus,uint64_t now)
 {
-    if(r->pending_count==16 || r->request_sequence>=65535 || r->fatal)return false;
+    if(r->pending_count==16 || r->request_sequence>=L5_REQUEST_MAX || r->fatal)return false;
     for(unsigned i=0;i<r->pending_count;i++)if(l5_kind(r->pending[i])==kind && l5_node(r->pending[i])==node && l5_bus(r->pending[i])==bus)return true;
     uint32_t event=l5_event(kind,node,bus,r->id,r->request_sequence+1);
     if(!l5_event_valid(event))return false;
-    uint16_t reserved;if(!l5_reserve_id(r,&reserved))return false;
+    uint32_t reserved;if(!l5_reserve_id(r,&reserved))return false;
     r->pending_base[r->pending_count]=r->meta.commit;r->pending[r->pending_count++]=event;r->next_client=now;return true;
 }
-bool l5_reserve_id(struct l5_agent*r,uint16_t*id)
+bool l5_reserve_id(struct l5_agent*r,uint32_t*id)
 {
-    if(r->fatal||r->request_sequence>=65535)return false;
+    if(r->fatal||r->request_sequence>=L5_REQUEST_MAX)return false;
     if(r->request_sequence==r->meta.client_seq){
-        r->meta.client_seq=r->meta.client_seq>65535-128?65535:r->meta.client_seq+128;
+        r->meta.client_seq=r->meta.client_seq>L5_REQUEST_MAX-128?L5_REQUEST_MAX:r->meta.client_seq+128;
         if(!save(r))return false;
     }
-    *id=(uint16_t)++r->request_sequence;return true;
+    *id=++r->request_sequence;return true;
 }
 void l5_receive(struct l5_agent *r,const struct l5_message *m,uint64_t now)
 {
@@ -238,8 +240,11 @@ void l5_receive(struct l5_agent *r,const struct l5_message *m,uint64_t now)
     bool pre=m->type==L5_PREVOTE||m->type==L5_PREVOTE_REPLY;
     if(!pre && m->term>r->meta.term)follow(r,m->term,0,now);
     if(r->fatal)return;
-    uint32_t own_last_term=term_at(r,r->last_index);
-    bool up_to_date=m->previous_term>own_last_term || (m->previous_term==own_last_term && m->index>=r->last_index);
+    bool up_to_date=false;
+    if(m->type==L5_PREVOTE||m->type==L5_VOTE){
+        uint32_t own_last_term=term_at(r,r->last_index);
+        up_to_date=m->previous_term>own_last_term || (m->previous_term==own_last_term && m->index>=r->last_index);
+    }
     switch(m->type){
     case L5_PREVOTE:{
         bool grant=m->term>=r->meta.term+1 && up_to_date &&
@@ -265,7 +270,13 @@ void l5_receive(struct l5_agent *r,const struct l5_message *m,uint64_t now)
         if(m->term!=r->meta.term){emit(r,response);break;}
         follow(r,m->term,m->source,now);r->leader_seen=true;r->last_contact=now;
         if(r->joining && m->commit>r->replay_until)r->replay_until=m->commit;
-        if(m->index>r->last_index || term_at(r,m->index)!=m->previous_term){emit(r,response);break;}
+        if(m->index>r->last_index){emit(r,response);break;}
+        if(term_at(r,m->index)!=m->previous_term){
+            /* Everything above the committed prefix can be rechecked with
+             * ordinary AppendEntries. Skip one network RTT per conflicting
+             * entry, retaining the prefix check and committed-entry guard. */
+            response.index=r->meta.commit+1;emit(r,response);break;
+        }
         uint32_t match=m->index;
         if(m->ok){
             if(!l5_event_valid(m->event)||!m->aux||m->aux>m->term){emit(r,response);break;}
@@ -336,5 +347,15 @@ void l5_pause(struct l5_agent *r,bool paused,uint64_t now)
     r->paused=paused;
     if(paused){r->role=L5_FOLLOWER;r->leader=0;}
     r->last_contact=now;r->election_due=now+timeout(r);
+}
+void l5_confirm_contact(struct l5_agent*r,unsigned peer,bool peer_is_leader,uint64_t sent)
+{
+    if(r->paused||r->fatal||peer<1||peer>3||peer==r->id)return;
+    if(r->role==L5_LEADER&&!peer_is_leader){
+        if(sent>r->last_ack[peer])r->last_ack[peer]=sent;
+        r->ack_seen[peer]=true;
+    }else if(r->role==L5_FOLLOWER&&peer_is_leader&&peer==r->leader&&sent>r->last_contact){
+        r->leader_seen=true;r->last_contact=sent;r->election_due=sent+timeout(r);
+    }
 }
 const struct l5_network *l5_get_network(const struct l5_agent *r){return &r->network;}

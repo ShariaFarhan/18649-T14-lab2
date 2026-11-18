@@ -14,6 +14,8 @@
     };
 };
 &flash0 {
+    /* Nucleo VDD is 3.3 V; the persistent log writes aligned words. */
+    write-block-size = <4>;
     partitions {
         compatible = "fixed-partitions";
         #address-cells = <1>; #size-cells = <1>;

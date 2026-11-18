@@ -25,12 +25,46 @@ K_MSGQ_DEFINE(button_edges,sizeof(uint64_t),8,4);
 static int wdt_channel=-1;
 static uint32_t required,last_feed;
 static bool watchdog_started;
+#if defined(LAB5_ENABLED) && NODE_ID == 3
+#include <zephyr/drivers/uart.h>
+#include <zephyr/sys/printk.h>
+#include <stm32_ll_rcc.h>
+/* Retained across watchdog resets, never written to the consensus log. */
+static __noinit volatile struct {
+    uint32_t magic, boots, mask, poll_ms, feed_ms, progress_ms[WORK_COUNT];
+} rear_diag;
+#define REAR_DIAG_MAGIC 0x52445732u
+void lab5_report_rear_reset(void)
+{
+    uint32_t csr = RCC->CSR;
+    LL_RCC_ClearResetFlags();
+    bool valid = rear_diag.magic == REAR_DIAG_MAGIC;
+    uint32_t boots = valid ? rear_diag.boots + 1 : 1;
+    char line[240];
+    snprintk(line,sizeof(line),"\r\nREAR_RESET boot=%u csr=%08x iwdg=%u wwdg=%u brown=%u soft=%u prev=%u poll=%u feed=%u mask=%x task_ms=%u,%u,%u,%u,%u,%u,%u,%u\r\n",
+        boots,csr,!!(csr&RCC_CSR_IWDGRSTF),!!(csr&RCC_CSR_WWDGRSTF),
+        !!(csr&RCC_CSR_BORRSTF),!!(csr&RCC_CSR_SFTRSTF),valid,
+        rear_diag.poll_ms,rear_diag.feed_ms,rear_diag.mask,
+        rear_diag.progress_ms[0],rear_diag.progress_ms[1],rear_diag.progress_ms[2],rear_diag.progress_ms[3],
+        rear_diag.progress_ms[4],rear_diag.progress_ms[5],rear_diag.progress_ms[6],rear_diag.progress_ms[7]);
+    const struct device *uart = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
+    if(device_is_ready(uart))for(char *s=line;*s;s++)uart_poll_out(uart,*s);
+    rear_diag.magic=REAR_DIAG_MAGIC;rear_diag.boots=boots;rear_diag.mask=0;rear_diag.poll_ms=0;rear_diag.feed_ms=0;
+    for(unsigned i=0;i<WORK_COUNT;i++)rear_diag.progress_ms[i]=0;
+}
+#endif
 
 static int output_init(const struct gpio_dt_spec *pin,bool high)
 {
     return gpio_is_ready_dt(pin) ? gpio_pin_configure_dt(pin,high ? GPIO_OUTPUT_ACTIVE : GPIO_OUTPUT_INACTIVE) : -ENODEV;
 }
-void lab3_progress(enum lab3_worker worker) { atomic_set(&progress[worker],k_uptime_get_32()); }
+void lab3_progress(enum lab3_worker worker) {
+    uint32_t now=k_uptime_get_32();
+    atomic_set(&progress[worker],now);
+#if defined(LAB5_ENABLED) && NODE_ID == 3
+    rear_diag.progress_ms[worker]=now;
+#endif
+}
 bool lab3_local_failed(void) { return atomic_get(&local_failed)!=0; }
 bool lab3_runtime_failed(void) { return atomic_get(&hardware_failed)!=0; }
 void lab3_err(bool error)
@@ -108,6 +142,9 @@ void lab3_watchdog_poll(void)
     lab3_progress(WORK_MAIN);
     uint32_t now=k_uptime_get_32();
     if (!watchdog_started || now-last_feed<20) return;
+#if defined(LAB5_ENABLED) && NODE_ID == 3
+    rear_diag.poll_ms=now;rear_diag.feed_ms=last_feed;rear_diag.mask=required;
+#endif
     for (unsigned i=0;i<WORK_COUNT;i++)
         if ((required & BIT(i)) && !lab3_progress_fresh(now,(uint32_t)atomic_get(&progress[i]))) return;
     if (wdt_feed(wdt,wdt_channel)) atomic_set(&hardware_failed,1);

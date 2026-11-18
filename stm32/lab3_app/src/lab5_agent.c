@@ -5,6 +5,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/storage/flash_map.h>
 #include <zephyr/sys/atomic.h>
+#include <zephyr/sys/byteorder.h>
 #include "lab5_agent.h"
 #include "block_log.h"
 #include "tx_queue.h"
@@ -35,6 +36,7 @@ static void signal_pin(unsigned index,bool level)
 {if(gpio_pin_set_dt(&pins[index],level))atomic_set(&output_fault,1);}
 struct incoming {struct can_frame frame;uint64_t at;uint8_t bus;bool legacy,fresh;};
 K_MSGQ_DEFINE(lab5_incoming,sizeof(struct incoming),128,8);
+K_MSGQ_DEFINE(lab5_priority_rx,sizeof(struct incoming),32,8);
 static struct l5_tx_queue outgoing[2];
 uint64_t lab5_local_us(void)
 {
@@ -102,7 +104,8 @@ bool lab5_board_capture(unsigned bus,const struct can_frame*f)
     if(!l5_wire_id(f->id))return false;
     if(!atomic_get(&ready)||f->flags&(CAN_FRAME_IDE|CAN_FRAME_RTR))return true;
     struct incoming in={.frame=*f,.at=lab5_local_us(),.bus=bus};
-    (void)k_msgq_put(&lab5_incoming,&in,K_NO_WAIT);return true;
+    struct k_msgq *queue=f->id<0x100?&lab5_priority_rx:&lab5_incoming;
+    (void)k_msgq_put(queue,&in,K_NO_WAIT);return true;
 }
 void lab5_board_legacy(unsigned bus,const struct can_frame*f,bool fresh)
 {
@@ -112,9 +115,10 @@ void lab5_board_legacy(unsigned bus,const struct can_frame*f,bool fresh)
 }
 static void agent_worker(void*a,void*b,void*c)
 {
-    ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);uint64_t status_at=0;
+    ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);uint64_t status_at=0,next_break=0;
     for(;;){
-        struct incoming in;int rc=k_msgq_get(&lab5_incoming,&in,K_USEC(100));
+        struct incoming in;int rc=k_msgq_get(&lab5_priority_rx,&in,K_NO_WAIT);
+        if(rc)rc=k_msgq_get(&lab5_incoming,&in,K_USEC(100));
         uint64_t now=lab5_local_us();
         if(!rc){
             if(in.legacy)l5_node_legacy(&node,in.bus,in.frame.id,in.frame.data,in.fresh,in.at);
@@ -128,11 +132,24 @@ static void agent_worker(void*a,void*b,void*c)
         struct l5_snapshot s;l5_node_snapshot(&node,&s);
         k_spinlock_key_t key=k_spin_lock(&snapshot_lock);published=s;k_spin_unlock(&snapshot_lock,key);
         if(now>=status_at){
+            if(s.fatal)printk("LAB5 HALT term=%u index=%u seq=%u reserved=%u slot=%u bank=%d/%d gen=%u/%u\n",
+                s.term,node.raft.last_index,node.raft.request_sequence,node.raft.meta.client_seq,log_store.meta_slot,
+                log_store.bank[0],log_store.bank[1],log_store.generation[0],log_store.generation[1]);
             printk("LAB5 NETWORK leader=%u term=%u commit=%u hash=%08x nodes=%x links=%u/%u/%u cockpit=%u fatal=%u time_pending=%u time_conflict=%u\n",
                 s.leader,s.term,s.commit,s.log_hash,s.network.nodes,s.network.links[1],s.network.links[2],s.network.links[3],s.network.cockpit_ok,s.fatal,s.time_pending,s.time_conflict);
+            struct can_frame status={.id=0x028+NODE_ID,.dlc=8};
+            status.data[0]=s.leader;
+            status.data[1]=(s.synced?1:0)|(s.fatal?2:0)|(s.time_pending?4:0)|(s.bus_degraded<<4);
+            sys_put_le16((uint16_t)s.term,status.data+2);
+            sys_put_le16((uint16_t)s.commit,status.data+4);
+            sys_put_le16((uint16_t)s.log_hash,status.data+6);
+            for(unsigned b=0;b<2;b++)l5_tx_add(&outgoing[b],status.id,status.data,now,false);
             status_at=now+1000000;
         }
         lab3_progress(WORK_LAB5);
+        /* A permanently nonempty RX queue never blocks. Let the lower-priority
+         * application and watchdog supervisor run even during log catch-up. */
+        if(now>=next_break){k_sleep(K_TICKS(1));next_break=lab5_local_us()+1000;}
     }
 }
 static void clock_worker(void*a,void*b,void*c)
@@ -186,6 +203,11 @@ int lab5_board_init(lab5_board_sender sender)
     if(flash->fa_size!=3*L5_BANK_BYTES)return -EINVAL;
     struct l5_block_ops io={NULL,flash_read_log,flash_write_log,flash_erase_log,NULL};
     if((rc=l5_block_mount(&log_store,&io)))return rc;
+    /* Prepare only the unselected copy-on-write sector before supervision.
+     * An interrupted erase cannot invalidate either mounted log bank. */
+    for(int bank=0;bank<3;bank++)if(bank!=log_store.bank[0]&&bank!=log_store.bank[1]){
+        if((rc=flash_erase_log(NULL,bank*L5_BANK_BYTES,L5_BANK_BYTES)))return rc;
+    }
     struct l5_storage store=l5_block_storage(&log_store);
     if((rc=l5_node_init(&node,NODE_ID,&store,NULL,output,entry,set_wallclock,lab5_local_us())))return rc;
     node.trace=trace;

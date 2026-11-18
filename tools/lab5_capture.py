@@ -12,15 +12,25 @@ def main():
                 cid,dlc,d=struct.unpack('=IB3x8s',s.recv(16))
                 if cid&0xe0000000 or dlc!=8:continue
                 row=dict(t=round(time.monotonic()-start,6),bus=f'can{sockets.index(s)}',id=f'0x{cid:03x}')
-                if 0x45<=cid<=0x4f:
+                if cid in (0x02a,0x02b):
+                    leader,flags,term,commit,hash16=struct.unpack('<BBHHH',d)
+                    row.update(type='NODE_STATUS',source=cid-0x028,leader=leader,term=term,commit=commit,hash_low16=hash16,flags=flags)
+                elif 0x35<=cid<=0x3f or 0x65<=cid<=0x6f:
+                    row.update(type='LEADER_PING' if cid<0x40 else 'LEADER_PONG',source=(cid>>2)&3,hop=cid&3,term=int.from_bytes(d[:2],'little'),cookie=int.from_bytes(d[2:],'little'))
+                elif 0x340<=cid<0x480:
+                    kind=(1,2,3,4,6)[(cid-0x340)//64]
+                    term,index,extra,ok,seq=struct.unpack('<HHHBB',d)
+                    row.update(type=TYPES[kind],source=(cid>>4)&3,destination=(cid>>2)&3,hop=cid&3,term=term,index=index,ok=ok,transaction=seq)
+                    row['aux' if kind==6 else 'previous_term']=extra
+                elif 0x45<=cid<=0x4f:
                     row.update(type='REF',leader=(cid-0x40)>>2,hop=cid&3,cycle=d[0],term_low=d[1],global_us=int.from_bytes(d[2:],'little'))
                 elif 0x80<=cid<=0xbf:
                     row.update(type='REF_ACK',source=((cid-0x80)>>4)&3,hop=cid&3,term=int.from_bytes(d[:2],'little'),destination=(cid>>2)&3,reference_time_us=int.from_bytes(d[2:],'little'))
-                elif 0xc0<=cid<=0xff:
-                    row.update(type='TIME_SAMPLE',source=((cid-0xc0)>>4)&3,hop=cid&3,destination=(cid>>2)&3,nonce=int.from_bytes(d[:4],'little'),global_low=int.from_bytes(d[4:],'little'))
-                elif 0x140<=cid<=0x1bf:
-                    row.update(type='TIME_QUERY' if cid<0x180 else 'TIME_PROOF',source=(cid>>4)&3,hop=cid&3,destination=(cid>>2)&3,term=int.from_bytes(d[:2],'little'),nonce=int.from_bytes(d[2:6],'little'),flags=d[6])
-                elif 0x501<=cid<=0x573 or 0x1c1<=cid<=0x1c3:
+                elif 0x240<=cid<=0x27f:
+                    row.update(type='TIME_SAMPLE',source=((cid-0x240)>>4)&3,hop=cid&3,destination=(cid>>2)&3,nonce=int.from_bytes(d[:4],'little'),global_low=int.from_bytes(d[4:],'little'))
+                elif 0x280<=cid<=0x2ff:
+                    row.update(type='TIME_QUERY' if cid<0x2c0 else 'TIME_PROOF',source=(cid>>4)&3,hop=cid&3,destination=(cid>>2)&3,term=int.from_bytes(d[:2],'little'),nonce=int.from_bytes(d[2:6],'little'),flags=d[6])
+                elif 0x501<=cid<=0x573 or 0x311<=cid<=0x313:
                     kind=11 if cid<0x500 else (cid-0x500)//16+1;source=(d[0]>>4)&3;dest=d[0]>>6;fragment=d[0]&15
                     if kind not in TYPES or fragment>=6:continue
                     key=(row['bus'],kind,source,dest,d[1]);parts=partial.setdefault(key,{})

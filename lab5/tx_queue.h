@@ -7,7 +7,7 @@ struct l5_tx_item {uint16_t id;uint8_t data[8];bool relay;uint64_t at,order;};
 struct l5_tx_queue {struct l5_tx_item items[128];unsigned count;uint64_t order;uint32_t dropped;};
 static inline uint64_t l5_tx_lifetime(uint16_t id)
 {
-    if(id==0x010 || (id>=0x100&&id<=0x102) || (id>=0x45&&id<=0xff))return 20000;
+    if(id==0x010 || (id>=0x100&&id<=0x102) || (id>=0x45&&id<=0xbf) || (id>=0x240&&id<=0x27f))return 20000;
     if(id==0x020)return 100000;
     return 200000;
 }
@@ -42,7 +42,7 @@ static inline void l5_tx_reference_delay(struct l5_tx_item*o,uint64_t now)
         uint64_t stamp=0;for(unsigned j=0;j<6;j++)stamp|=(uint64_t)o->data[j+2]<<(8*j);
         stamp+=now-o->at;for(unsigned j=0;j<6;j++)o->data[j+2]=stamp>>(8*j);
     }
-    else if(o->id>=0xc0&&o->id<=0xff){
+    else if(o->id>=0x240&&o->id<=0x27f){
         uint32_t stamp=0;for(unsigned j=0;j<4;j++)stamp|=(uint32_t)o->data[j+4]<<(8*j);
         stamp+=(uint32_t)(now-o->at);for(unsigned j=0;j<4;j++)o->data[j+4]=stamp>>(8*j);
     }

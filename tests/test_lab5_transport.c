@@ -10,6 +10,7 @@ static struct lab3_can_rx rx[4];static struct l5_tx_queue queues[4][2];
 static bool online[4],paused[4],link_up[4][2];static uint64_t now,bus_free[2],next_hb[4];
 static uint8_t hb_seq[4];static unsigned replayed[4],events[4];
 static uint64_t boot_time[4];
+static bool only_consensus_pulses;
 static uint64_t local(unsigned id){return now-boot_time[id];}
 static int load(void*v,struct l5_meta*m,uint32_t*n){struct store*s=v;*m=s->meta;*n=s->count;return 0;}
 static int readlog(void*v,uint32_t i,struct l5_entry*e){struct store*s=v;if(!i||i>s->count)return -1;*e=s->entries[i-1];return 0;}
@@ -47,6 +48,8 @@ static void step(void)
         unsigned listeners=0;for(unsigned p=1;p<=3;p++)if(p!=who&&online[p]&&link_up[p][b])listeners++;
         if(!listeners)continue;
         l5_tx_reference_delay(&best,now);l5_tx_remove(&queues[who][b],slot);bus_free[b]=now+300;
+        if(only_consensus_pulses && !(best.id>=0x35&&best.id<=0x3f) &&
+           !(best.id>=0x65&&best.id<=0x6f))continue;
         for(unsigned p=1;p<=3;p++)if(p!=who&&online[p]&&link_up[p][b]){
             if(l5_wire_id(best.id))l5_node_receive(&nodes[p],b,best.id,best.data,8,local(p),local(p));
             else{
@@ -198,4 +201,12 @@ int main(void)
     for(unsigned p=1;p<=3;p++)assert(nodes[p].raft.network.links[p]==2);
     printf("PASS CAN simulation: fragmented RPCs, REF forwarding, link-state commit, no link-fault election, leader failover and replay (%u)\n",replayed[1]);
     clock_recovery();boot_and_bridges();epoch_safety();
+    reset();boot(1);boot(2);boot(3);advance(2000);
+    uint32_t stable_term=nodes[1].raft.meta.term;
+    only_consensus_pulses=true;advance(1500);
+    for(unsigned p=1;p<=3;p++)assert(nodes[p].raft.leader==1&&nodes[p].raft.meta.term==stable_term);
+    struct l5_snapshot unsynced;l5_node_snapshot(&nodes[2],&unsynced);assert(!unsynced.synced);
+    online[2]=online[3]=false;advance(120);
+    assert(nodes[1].raft.role!=L5_LEADER);
+    puts("PASS leader remains elected without clock samples or bulk RPCs, steps down on actual quorum loss");
 }

@@ -4,12 +4,15 @@
 /* Last-hop IDs differ between transmitters: a forwarded REF may compensate
  * residence time without colliding with its origin's different CAN payload. */
 #define L5_REF_BASE 0x040u
+#define L5_PING_BASE 0x030u
+#define L5_PONG_BASE 0x060u
 #define L5_ACK_BASE 0x080u
-#define L5_SAMPLE_BASE 0x0c0u
-#define L5_QUERY_BASE 0x140u
-#define L5_PROOF_BASE 0x180u
-#define L5_TIME_REPLY_BASE 0x1c0u
+#define L5_SAMPLE_BASE 0x240u
+#define L5_QUERY_BASE 0x280u
+#define L5_PROOF_BASE 0x2c0u
+#define L5_TIME_REPLY_BASE 0x310u
 #define L5_RPC_BASE 0x500u
+#define L5_SHORT_BASE 0x340u
 struct l5_wire_slot {
     uint8_t bytes[36],transaction,seen[2],forwarded[2];
     uint64_t touched;
@@ -20,6 +23,9 @@ struct l5_sample_seen {uint32_t nonce;bool valid;};
 struct l5_wire {
     struct l5_wire_slot slots[11][4][4];
     struct l5_reference_seen refs[4],acks[4];
+    struct l5_reference_seen pulses[2][4];
+    uint64_t direct_at[4][2];
+    bool direct_known[4][2];
     struct l5_sample_seen samples[4][4];
     struct l5_sample_seen compact[2][4][4];
     uint8_t transactions[12],id;

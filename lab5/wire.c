@@ -6,7 +6,9 @@ static uint32_t crc(const uint8_t*d,unsigned n){uint32_t c=~0u;for(unsigned i=0;
 static uint64_t get48(const uint8_t*d){uint64_t x=0;for(unsigned i=0;i<6;i++)x|=(uint64_t)d[i]<<(8*i);return x;}
 static void put48(uint8_t*d,uint64_t x){for(unsigned i=0;i<6;i++)d[i]=x>>(8*i);}
 bool l5_wire_id(uint16_t id)
-{return (id>=0x45&&id<=0x4f)||(id>=0x80&&id<=0xff)||(id>=0x140&&id<=0x1c3)||(id>=0x501&&id<=0x573);}
+{return (id>=0x35&&id<=0x3f)||(id>=0x65&&id<=0x6f)||(id>=0x45&&id<=0x4f)||(id>=0x80&&id<=0xbf)||(id>=L5_SAMPLE_BASE&&id<L5_PROOF_BASE+64)||(id>L5_TIME_REPLY_BASE&&id<=L5_TIME_REPLY_BASE+3)||(id>=L5_SHORT_BASE&&id<0x480)||(id>=0x501&&id<=0x573);}
+static uint16_t get16(const uint8_t*d){return d[0]|((uint16_t)d[1]<<8);}
+static void put16(uint8_t*d,uint32_t v){d[0]=v;d[1]=v>>8;}
 static uint16_t rpc_id(unsigned type,unsigned hop)
 {return type==L5_TIME_REPLY?L5_TIME_REPLY_BASE+hop:L5_RPC_BASE+(type-1)*16+hop;}
 void l5_wire_init(struct l5_wire*w,unsigned id,uint32_t delay,void*context,
@@ -16,6 +18,21 @@ void l5_wire_init(struct l5_wire*w,unsigned id,uint32_t delay,void*context,
 {memset(w,0,sizeof(*w));w->id=id;w->delay_us=delay;for(unsigned i=0;i<4;i++)w->delay_by_hop[i]=delay;w->context=context;w->send_frame=send;w->message=message;w->reference=reference;}
 void l5_wire_send(struct l5_wire*w,const struct l5_message*m,unsigned buses)
 {
+    /* The persisted term and log capacity fit 16 bits. These messages have
+     * at most three nonzero numeric fields. Deliver each in one CAN frame. */
+    if((m->type>=L5_PREVOTE&&m->type<=L5_VOTE_REPLY)||m->type==L5_APPEND_REPLY){
+        unsigned k=m->type==L5_APPEND_REPLY?4:m->type-1;
+        uint8_t d[8]={0};put16(d,m->term);put16(d+2,m->index);
+        put16(d+4,m->type==L5_APPEND_REPLY?m->aux:m->previous_term);
+        d[6]=m->ok;d[7]=w->transactions[m->type]++;
+        w->send_frame(w->context,buses,L5_SHORT_BASE+k*64+m->source*16+m->destination*4+w->id,d);
+        return;
+    }
+    if(m->type==L5_LEADER_PING||m->type==L5_LEADER_PONG){
+        unsigned base=m->type==L5_LEADER_PING?L5_PING_BASE:L5_PONG_BASE;
+        uint8_t d[8]={m->term&255,m->term>>8};put48(d+2,((uint64_t)m->aux<<32)|m->index);
+        w->send_frame(w->context,buses,base+m->source*4+w->id,d);return;
+    }
     if(m->type==L5_TIME_QUERY||(m->type==L5_TIME_REPLY&&!(m->ok&1))){
         uint8_t d[8]={m->term&255,(m->term>>8)&255,0,0,0,0,m->ok,0};put32(d+2,m->index);
         unsigned base=m->type==L5_TIME_QUERY?L5_QUERY_BASE:L5_PROOF_BASE;
@@ -53,7 +70,46 @@ bool l5_wire_receive(struct l5_wire*w,unsigned bus,uint16_t id,const uint8_t*d,u
 {
     if(!l5_wire_id(id))return false;
     if(bus>1||dlc!=8)return true;
-    if(id>=L5_QUERY_BASE&&id<L5_TIME_REPLY_BASE){
+    unsigned src=0;
+    if(id>=L5_SHORT_BASE&&id<0x480)src=(id>>4)&3;
+    else if(id>=L5_RPC_BASE||id>L5_TIME_REPLY_BASE)src=(d[0]>>4)&3;
+    else if((id>=L5_REF_BASE&&id<=0x4f)||(id>=0x35&&id<=0x3f)||(id>=0x65&&id<=0x6f))src=(id>>2)&3;
+    else src=(id>>4)&3;
+    if(src&&src==(id&3)){w->direct_known[src][bus]=true;w->direct_at[src][bus]=at;}
+    if(id>=L5_SHORT_BASE&&id<0x480){
+        unsigned k=(id-L5_SHORT_BASE)/64,type=k==4?L5_APPEND_REPLY:k+1,dest=(id>>2)&3;
+        if(!src||src==w->id||!(id&3))return true;
+        struct l5_wire_slot*s=&w->slots[type-1][src][dest];
+        if(s->active&&now-s->touched<200000){
+            uint8_t distance=d[7]-s->transaction;
+            if(!distance||distance>=128)return true;
+        }
+        s->active=true;s->transaction=d[7];s->touched=now;
+        if(dest!=w->id)w->send_frame(w->context,1u<<(bus^1),(id&~3u)+w->id,d);
+        if(!dest||dest==w->id){
+            struct l5_message m={.type=type,.source=src,.destination=dest,.term=get16(d),.index=get16(d+2),.ok=d[6]};
+            if(type==L5_APPEND_REPLY)m.aux=get16(d+4);else m.previous_term=get16(d+4);
+            w->message(w->context,&m,at);
+        }
+        return true;
+    }
+    if((id>=0x35&&id<=0x3f)||(id>=0x65&&id<=0x6f)){
+        bool pong=id>=0x65;unsigned base=pong?L5_PONG_BASE:L5_PING_BASE;
+        unsigned source=(id-base)>>2,hop=id&3;
+        if(!source||!hop||source==w->id)return true;
+        uint32_t term=d[0]|((uint32_t)d[1]<<8);uint64_t stamp=get48(d+2);
+        struct l5_reference_seen*s=&w->pulses[pong][source];
+        if(hop==source){w->direct_known[source][bus]=true;w->direct_at[source][bus]=at;}
+        if(s->valid&&(term<s->full_term||(term==s->full_term&&stamp<=s->stamp)))return true;
+        *s=(struct l5_reference_seen){.valid=true,.full_term=term,.stamp=stamp};
+        struct l5_message m={.type=pong?L5_LEADER_PONG:L5_LEADER_PING,.source=source,.term=term,.index=(uint32_t)stamp,.aux=(uint32_t)(stamp>>32)};
+        w->message(w->context,&m,at);
+        unsigned other=bus^1;
+        if(!w->direct_known[source][other]||now-w->direct_at[source][other]>=40000)
+            w->send_frame(w->context,1u<<other,base+source*4+w->id,d);
+        return true;
+    }
+    if(id>=L5_QUERY_BASE&&id<L5_PROOF_BASE+64){
         bool query=id<L5_PROOF_BASE;unsigned base=query?L5_QUERY_BASE:L5_PROOF_BASE;
         unsigned source=((id-base)>>4)&3,dest=(id>>2)&3,hop=id&3;
         if(!source||!dest||!hop||source==w->id)return true;
@@ -70,7 +126,7 @@ bool l5_wire_receive(struct l5_wire*w,unsigned bus,uint16_t id,const uint8_t*d,u
         }else w->send_frame(w->context,1u<<(bus^1),base+(source<<4)+(dest<<2)+w->id,d);
         return true;
     }
-    if(id>=L5_SAMPLE_BASE&&id<=0xff){
+    if(id>=L5_SAMPLE_BASE&&id<L5_SAMPLE_BASE+64){
         unsigned source=((id-L5_SAMPLE_BASE)>>4)&3,dest=(id>>2)&3,hop=id&3;
         if(!source||!dest||!hop||source==w->id)return true;
         uint32_t nonce=get32(d);struct l5_sample_seen*s=&w->samples[source][dest];
