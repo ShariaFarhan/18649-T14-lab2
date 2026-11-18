@@ -1,9 +1,8 @@
 # Lab 5 additions on the team's `lab3-complete`
 
-Base: remote `lab3-complete`, commit `524238d`. Work is isolated on local
-`codex/lab5-time-consensus`. No push, flashing, or running-service changes have
-been made. Lab 3 remains the default build. Existing motor/servo/PID drivers,
-Windows input protocol, pins and the team's SPI/receive timing changes remain.
+Start with [Run Lab 5](#run-lab-5). N1 is the Pi cockpit, N2 is the Front
+steering board, and N3 is the Rear drive board. All three must run the same
+Lab 5 revision. The base firmware build defaults to Lab 3.
 
 ## Scope and implementation
 
@@ -145,18 +144,20 @@ suffix repair or metadata-bank recycling can require it. **Worst-case hardware
 erase timing is not validated; this is a deployment/timing risk to measure,
 not a claimed timing pass.**
 
-## Build without changing Lab3 behavior
+## Run Lab 5
 
-From the repository:
+**Get the branch.** On the build computer and Pi, clone the repository below.
+The Windows wheel sender also runs from this checkout. Use the existing
+[dual-CAN wiring and Pi 4 setup](LAB3_TESTING_TUTORIAL.md), then connect the
+[Lab 5 signals](#added-signal-pins). Both buses run at 500 kbit/s.
 
 ```sh
-python3 tools/lab5_config.py --check
-sh tools/test_lab5.sh
-sh tools/test_lab3.sh
-sh tools/build_lab5_pi.sh
+git clone --branch codex/lab5-time-consensus --single-branch https://github.com/ShariaFarhan/18649-T14-lab2.git
+cd 18649-T14-lab2
 ```
 
-In the existing Zephyr4.1 workspace/toolchain:
+**Build and flash both STM32s.** In a configured Zephyr 4.1 workspace, replace
+`/absolute/path/to/repo` below with the checkout path.
 
 ```sh
 west build -b nucleo_f401re /absolute/path/to/repo/stm32/lab3_app \
@@ -165,11 +166,32 @@ west build -b nucleo_f401re /absolute/path/to/repo/stm32/lab3_app \
   -d build-lab5-rear -- -DNODE_ID=3 -DLAB5_ENABLED=ON
 ```
 
-Omit `-DLAB5_ENABLED=ON` in a separate build directory to retain the original
-Lab3 application. Do not reuse its image for Lab5 or vice versa. This branch
-has not been flashed; firmware filenames/build outputs are local only.
+Disconnect actuator power and close serial monitors. Plug in one board at a
+time through ST-LINK USB. Copy `build-lab5-front/zephyr/zephyr.bin` to the
+Front board's Nucleo USB drive and `build-lab5-rear/zephyr/zephyr.bin` to the
+Rear board's drive. Wait for each write to finish. The 115200-baud consoles
+identify N2 and N3. Keep the existing flash log for restart/rejoin tests.
 
-Pi, after the existing CAN setup and after stopping its previous cockpit:
+**Start the Pi.** From the repo root on the Pi, with GCC, Python 3 and GPIO
+access, build the cockpit. Check the CAN interfaces after each Pi reboot.
+
+```sh
+sh tools/build_lab5_pi.sh
+ip -br link show type can
+readlink /sys/class/net/can0/device  # A: spi0.0
+readlink /sys/class/net/can1/device  # B: spi0.1
+```
+
+For each interface that is DOWN, run its corresponding command:
+
+```sh
+sudo ip link set can0 up type can bitrate 500000 restart-ms 20
+sudo ip link set can1 up type can bitrate 500000 restart-ms 20
+```
+
+Stop any previous cockpit before starting this one. Replace `YOUR_WINDOWS_IP`
+with the sender's address as seen by the Pi (the PC's Tailscale address if
+using Tailscale). Keep this terminal open and reuse the same state directory.
 
 ```sh
 mkdir -p build-lab5/state
@@ -178,12 +200,23 @@ mkdir -p build-lab5/state
   --throttle 65535,0 --brake 65535,0
 ```
 
-The Windows sender remains the existing `tools/windows_wheel_udp.py`. In a
-second Pi terminal:
+**Start the wheel sender.** Connect the G920 to Windows. From the repo root
+in PowerShell, replace `YOUR_PI_IP` with the reachable Pi address. Keep this
+terminal open and gently move the wheel to obtain its first real sample.
+
+```powershell
+New-Item -ItemType Directory -Force build-logs | Out-Null
+python tools/windows_wheel_udp.py --pi YOUR_PI_IP --status build-logs/wheel-status.json
+```
+
+**Verify.** The Pi should show `NORMAL` after valid input and a healthy cluster.
+If it shows `UDP_LOST`, check that `wheel-status.json` has `ready=true`, an
+increasing `sent` count and a source IP matching `--pc-ip`. In a second Pi
+terminal at the repo root:
 
 ```sh
-python3 tools/lab5_display.py build-lab5/state/raft.log
-python3 tools/lab5_capture.py --seconds 60 --output build-lab5/trace.json
+python3 tools/lab5_capture.py --seconds 60 --output build-lab5/trace.json | grep NODE_STATUS
+python3 tools/lab5_display.py build-lab5/state/raft.log --once
 ```
 
 `LAB5 NETWORK` prints leader, term, commit index, committed-log hash, node
@@ -191,6 +224,12 @@ bitmap and the three link masks (A=1, B=2, both=3). Compare the same commit
 index/hash/graph across nodes after convergence. `LAB5 LOG` prints entry
 identity and live/replayed. `LAB5 PPS` prints global/local microseconds,
 drift ratio, correction and SYNC. The display contains one row per EVENT index.
+Both STM32 `NODE_STATUS` records and the Pi's `NETWORK` lines should agree on
+one nonzero leader and term throughout the observation. With all branches
+connected, expect `nodes=0xe links=3/3/3` after convergence. Compare hashes
+at the same commit index (CAN status carries the low 16 bits). Confirm that
+new EVENTs advance the commit index. For the physical PPS check, trigger on
+the leader's rising edge and measure each follower relative to that edge.
 
 ## Added signal pins
 

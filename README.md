@@ -1,8 +1,7 @@
 # Team 14 Lab 3: Dual CAN
 
-Local Lab5 additions are documented in [docs/LAB5.md](docs/LAB5.md).
-They are opt-in (`LAB5_ENABLED=ON` / Pi `--lab5-log`); the Lab3 build remains
-the default. This work starts from the team's `lab3-complete` branch.
+**[Start Lab 5: build, flash, run the wheel, and verify all three nodes](docs/LAB5.md#run-lab-5).**
+Lab 5 uses the Lab 3 wiring plus the [clock signals](docs/LAB5.md#added-signal-pins).
 
 **[Wiring, running, and testing tutorial](docs/LAB3_TESTING_TUTORIAL.md)**
 
